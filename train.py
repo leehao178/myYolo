@@ -2,27 +2,25 @@ import os
 import argparse
 import time
 import shutil
-
 import torch
-from torch.utils.data import DataLoader
 from torch import nn
-from torchvision import transforms
-import torchvision.datasets as datasets
-import torchvision
 from models.heads.classifier import Classifier
 from torch.utils.tensorboard import SummaryWriter
-from torch.utils.data.distributed import DistributedSampler
 from torch.optim.lr_scheduler import StepLR
 import datetime
+from models.data.datasets.dataset import Dataset
 
+
+# '/home/lab602.demo/.pipeline/datasets/mnist'
+# '/home/lab602.demo/.pipeline/datasets/ImageNet/ILSVRC2012'
 parser = argparse.ArgumentParser(description='Netowks Classification Training')
-parser.add_argument('-n', '--name', default='mnist', type=str, help='name')
-parser.add_argument('--data', default='/home/lab602.demo/.pipeline/datasets/mnist',
+parser.add_argument('-n', '--name', default='imagenet', type=str, help='name')
+parser.add_argument('--data', default='/home/lab602.demo/.pipeline/datasets/ImageNet/ILSVRC2012',
                     type=str,
                     metavar='DIR',
                     help='path to dataset')
 parser.add_argument('--resume', default='', type=str, metavar='PATH', help='path to latest checkpoint (default: none)')
-parser.add_argument('--epochs', default=10, type=int, metavar='N',
+parser.add_argument('--epochs', default=100, type=int, metavar='N',
                     help='number of total epochs to run')
 parser.add_argument('--start-epoch', default=0, type=int, metavar='N',
                     help='manual epoch number (useful on restarts)')
@@ -47,6 +45,7 @@ parser.add_argument('--gpu', default=2, type=int,
 parser.add_argument("--local_rank", type=int, default=0,
                     help='node rank for distributed training')
 
+
 def main():
     args = parser.parse_args()
     os.environ['CUDA_VISIBLE_DEVICES'] = '0,1,2'
@@ -65,7 +64,7 @@ def main():
             torch.cuda.set_device(args.gpu)
             print("Use GPU: {} for training".format(args.gpu))
 
-    model = Classifier(10, 1, False)
+    model = Classifier(num_classes=1000, in_channels=3, pretrained=False)
 
     if milti_gpus:
         # 4) 封裝之前要把模型移到對應的gpu
@@ -111,46 +110,13 @@ def main():
         else:
             print("=> no checkpoint found at '{}'".format(args.resume))
 
-
-    normalize = transforms.Normalize((0.1307,), (0.3081,))
-    
-    train_dataset = torchvision.datasets.MNIST(root=args.data,
-                                                train=True,
-                                                transform=transforms.Compose([transforms.RandomResizedCrop(224),
-                                                                                transforms.RandomHorizontalFlip(),
-                                                                                transforms.ToTensor(),
-                                                                                normalize,]),
-                                                download=True)
-
-    val_dataset = torchvision.datasets.MNIST(root=args.data, train=False,
-                                                        transform=transforms.Compose([
-                transforms.Resize(256),
-                transforms.CenterCrop(224),
-                transforms.ToTensor(),
-                normalize,
-            ]),
-                                                        download=True)
-    
-    if milti_gpus:
-        train_sampler =DistributedSampler(train_dataset)
-        train_loader = torch.utils.data.DataLoader(dataset=train_dataset,
-                         batch_size=args.batch_size,
-                         sampler=train_sampler,
-            num_workers=args.workers, pin_memory=True)
-
-        val_loader = torch.utils.data.DataLoader(
-            val_dataset,
-            batch_size=args.batch_size, sampler=DistributedSampler(val_dataset),
-            num_workers=args.workers, pin_memory=True)
-    else:
-        train_loader = torch.utils.data.DataLoader(
-            train_dataset, batch_size=args.batch_size, shuffle= True,
-            num_workers=args.workers, pin_memory=True)
-
-        val_loader = torch.utils.data.DataLoader(
-            val_dataset,
-            batch_size=args.batch_size, shuffle=False,
-            num_workers=args.workers, pin_memory=True)
+    custom_datasets = Dataset(img_size=224,
+                        batch_size=args.batch_size,
+                        workers=args.workers,
+                        isDistributed=True,
+                        data_dir=args.data,
+                        MNIST=False)
+    train_loader, val_loader, train_sampler = custom_datasets.dataloader()
 
     best_acc1 = 0
 
