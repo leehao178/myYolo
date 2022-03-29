@@ -1,0 +1,5 @@
+torchsummary==1.5.1
+loguru
+opencv_python
+tensorboard
+tqdm
