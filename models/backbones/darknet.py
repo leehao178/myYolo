@@ -88,11 +88,101 @@ class Darknet53(nn.Module):
         return dark3, dark4, dark5
 
 
+class Darknet19(nn.Module):
+    def __init__(self, in_channels=3, pretrained=False):
+        super(Darknet19, self).__init__()
+        self.conv1 = Conv2d(in_channels=in_channels, out_channels=32, kernel_size=3, stride=1, padding=1)
+        
+        self.maxpool1 = nn.MaxPool2d(kernel_size=2, stride=2)
+        self.conv2 = Conv2d(in_channels=32, out_channels=64, kernel_size=3, stride=1, padding=1)
+        
+        self.maxpool2 = nn.MaxPool2d(kernel_size=2, stride=2)
+        self.conv3 = Conv2d(in_channels=64, out_channels=128, kernel_size=3, stride=1, padding=1)
+        self.conv4 = Conv2d(in_channels=128, out_channels=64, kernel_size=1, stride=1, padding=0)
+        self.conv5 = Conv2d(in_channels=64, out_channels=128, kernel_size=3, stride=1, padding=1)
+        
+        self.maxpool3 = nn.MaxPool2d(kernel_size=2, stride=2)
+        self.conv6 = Conv2d(in_channels=128, out_channels=256, kernel_size=3, stride=1, padding=1)
+        self.conv7 = Conv2d(in_channels=256, out_channels=128, kernel_size=1, stride=1, padding=0)
+        self.conv8 = Conv2d(in_channels=128, out_channels=256, kernel_size=3, stride=1, padding=1)
+        
+        self.maxpool4 = nn.MaxPool2d(kernel_size=2, stride=2)
+        self.conv9 = Conv2d(in_channels=256, out_channels=512, kernel_size=3, stride=1, padding=1)
+        self.conv10 = Conv2d(in_channels=512, out_channels=256, kernel_size=1, stride=1, padding=0)
+        self.conv11 = Conv2d(in_channels=256, out_channels=512, kernel_size=3, stride=1, padding=1)
+        self.conv12 = Conv2d(in_channels=512, out_channels=256, kernel_size=1, stride=1, padding=0)
+        self.conv13 = Conv2d(in_channels=256, out_channels=512, kernel_size=3, stride=1, padding=1)
+        
+        self.maxpool5 = nn.MaxPool2d(kernel_size=2, stride=2)
+        self.conv14 = Conv2d(in_channels=512, out_channels=1024, kernel_size=3, stride=1, padding=1)
+        self.conv15 = Conv2d(in_channels=1024, out_channels=512, kernel_size=1, stride=1, padding=0)
+        self.conv16 = Conv2d(in_channels=512, out_channels=1024, kernel_size=3, stride=1, padding=1)
+        self.conv17 = Conv2d(in_channels=1024, out_channels=512, kernel_size=1, stride=1, padding=0)
+        self.conv18 = Conv2d(in_channels=512, out_channels=1024, kernel_size=3, stride=1, padding=1)
+
+
+    def forward(self, x):
+        if torch.cuda.is_available():
+            x = x.cuda()
+        x = self.conv1(x)
+
+        x = self.maxpool1(x)
+        x = self.conv2(x)
+
+        x = self.maxpool2(x)
+        x = self.conv3(x)
+        x = self.conv4(x)
+        x = self.conv5(x)
+
+        x = self.maxpool3(x)
+        x = self.conv6(x)
+        x = self.conv7(x)
+        x = self.conv8(x)
+
+        x = self.maxpool4(x)
+        x = self.conv9(x)
+        x = self.conv10(x)
+        x = self.conv11(x)
+        x = self.conv12(x)
+        x = self.conv13(x)
+
+        x = self.maxpool5(x)
+        x = self.conv14(x)
+        x = self.conv15(x)
+        x = self.conv16(x)
+        x = self.conv17(x)
+        out = self.conv18(x)
+        return out
+
+    def _initialize_weights(self):
+        for m in self.modules():
+            if isinstance(m, nn.Conv2d):
+                nn.init.kaiming_normal_(m.weight, mode='fan_out', nonlinearity='relu')
+                if m.bias is not None:
+                    nn.init.constant_(m.bias, 0)
+            elif isinstance(m, nn.BatchNorm2d):
+                nn.init.constant_(m.weight, 1)
+                nn.init.constant_(m.bias, 0)
+
+    def load_weight(self):
+        weight_file = 'weights/darknet19-deepBakSu-e1b3ec1e.pth'
+        # 轉換權重文件中的keys.(change the weights dict `keys)
+        assert len(torch.load(weight_file).keys()) == len(self.state_dict().keys())
+        dic = {}
+        for now_keys, values in zip(self.state_dict().keys(), torch.load(weight_file).values()):
+            dic[now_keys]=values
+        self.load_state_dict(dic)
+
 if __name__ == '__main__':
     from torchsummary import summary
 
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-    model = Darknet53()
+    model = Darknet19()
     model = model.to(device)
 
     summary(model, (3, 224, 224))
+ 
+    params=model.state_dict()
+
+    for k,v in params.items():
+        print(k)
