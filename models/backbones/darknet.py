@@ -3,10 +3,11 @@ import torch.nn as nn
 
 
 class Conv2d(nn.Module):
-    def __init__(self, in_channels, out_channels, kernel_size, stride, padding):
+    def __init__(self, in_channels, out_channels, kernel_size, stride, padding, bn=True):
         super(Conv2d, self).__init__()
         self.conv = nn.Conv2d(in_channels=in_channels, out_channels=out_channels, kernel_size=kernel_size, stride=stride, padding=padding, bias=False)
-        self.bn = nn.BatchNorm2d(out_channels)
+        if bn:
+            self.bn = nn.BatchNorm2d(out_channels)
         self.leakyreLU = nn.LeakyReLU(0.1)
 
         # 參數初始化。不這麼初始化，容易梯度爆炸nan
@@ -71,8 +72,8 @@ class Darknet53(nn.Module):
         self.stack_residual_block_5 = StackResidualBlock(in_channels=1024, num_block=4)
 
     def forward(self, x):
-        if torch.cuda.is_available():
-            x = x.cuda()
+        # if torch.cuda.is_available():
+        #     x = x.cuda()
         x = self.conv1(x)
         x = self.conv2(x)
         x = self.stack_residual_block_1(x)

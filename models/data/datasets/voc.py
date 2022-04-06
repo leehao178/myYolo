@@ -1,4 +1,3 @@
-from operator import imod
 from torch.utils.data import Dataset
 import torch.nn.functional as F
 import torch
@@ -57,70 +56,6 @@ class ImageFolder(Dataset):
     def __len__(self):
         return len(self.files)
 
-def get_ann_info(self, idx):
-    """Get annotation from XML file by index.
-    Args:
-        idx (int): Index of data.
-    Returns:
-        dict: Annotation info of specified index.
-    """
-
-    img_id = self.data_infos[idx]['id']
-    xml_path = osp.join(self.img_prefix, self.ann_subdir, f'{img_id}.xml')
-    tree = ET.parse(xml_path)
-    root = tree.getroot()
-    bboxes = []
-    labels = []
-    bboxes_ignore = []
-    labels_ignore = []
-    for obj in root.findall('object'):
-        name = obj.find('name').text
-        if name not in self.CLASSES:
-            continue
-        label = self.cat2label[name]
-        difficult = obj.find('difficult')
-        difficult = 0 if difficult is None else int(difficult.text)
-        bnd_box = obj.find('bndbox')
-        # TODO: check whether it is necessary to use int
-        # Coordinates may be float type
-        bbox = [
-            int(float(bnd_box.find('xmin').text)),
-            int(float(bnd_box.find('ymin').text)),
-            int(float(bnd_box.find('xmax').text)),
-            int(float(bnd_box.find('ymax').text))
-        ]
-        ignore = False
-        if self.min_size:
-            assert not self.test_mode
-            w = bbox[2] - bbox[0]
-            h = bbox[3] - bbox[1]
-            if w < self.min_size or h < self.min_size:
-                ignore = True
-        if difficult or ignore:
-            bboxes_ignore.append(bbox)
-            labels_ignore.append(label)
-        else:
-            bboxes.append(bbox)
-            labels.append(label)
-    if not bboxes:
-        bboxes = np.zeros((0, 4))
-        labels = np.zeros((0, ))
-    else:
-        bboxes = np.array(bboxes, ndmin=2) - 1
-        labels = np.array(labels)
-    if not bboxes_ignore:
-        bboxes_ignore = np.zeros((0, 4))
-        labels_ignore = np.zeros((0, ))
-    else:
-        bboxes_ignore = np.array(bboxes_ignore, ndmin=2) - 1
-        labels_ignore = np.array(labels_ignore)
-    ann = dict(
-        bboxes=bboxes.astype(np.float32),
-        labels=labels.astype(np.int64),
-        bboxes_ignore=bboxes_ignore.astype(np.float32),
-        labels_ignore=labels_ignore.astype(np.int64))
-    return ann
-
 class ListDataset(Dataset):
     def __init__(self, list_path, img_size=416, multiscale=True, transform=None, years=['VOC2007', 'VOC2012'], traintype='train'):
         self.CLASSES = ('aeroplane', 'bicycle', 'bird', 'boat', 'bottle', 'bus', 'car',
@@ -129,12 +64,14 @@ class ListDataset(Dataset):
                'tvmonitor')
         self.cat2label = {cat: i for i, cat in enumerate(self.CLASSES)}
         self.img_files = []
+        self.imgs_ids = []
         self.label_files = []
         for year in years:
             with open(os.path.join(list_path, year, 'ImageSets', 'Main', '{}.txt'.format(traintype)), "r") as f:
                 img_ids = f.readlines()
             for img_id in img_ids:
                 self.img_files.append(os.path.join(list_path, year, 'JPEGImages', f'{img_id.strip()}.jpg'))
+                self.imgs_ids.append(img_id.strip())
                 xml_path = os.path.join(list_path, year, 'Annotations', f'{img_id.strip()}.xml')
                 tree = ET.parse(xml_path)
                 root = tree.getroot()
@@ -152,12 +89,21 @@ class ListDataset(Dataset):
                     bnd_box = obj.find('bndbox')
                     # TODO: check whether it is necessary to use int
                     # Coordinates may be float type
+                    xmin = int(float(bnd_box.find('xmin').text))
+                    ymin = int(float(bnd_box.find('ymin').text))
+                    xmax = int(float(bnd_box.find('xmax').text))
+                    ymax = int(float(bnd_box.find('ymax').text))
+                    w = xmax - xmin
+                    h = ymax - ymin
+                    x = xmin + w*0.5
+                    y = ymin + h*0.5
                     bbox = [
-                        int(float(bnd_box.find('xmin').text)),
-                        int(float(bnd_box.find('ymin').text)),
-                        int(float(bnd_box.find('xmax').text)),
-                        int(float(bnd_box.find('ymax').text)),
-                        label
+                        label,
+                        x,
+                        y,
+                        w,
+                        h,
+                        
                     ]
                     bboxes.append(bbox)
                 bboxes = np.array(bboxes)
@@ -218,14 +164,15 @@ class ListDataset(Dataset):
         self.transform = transform
 
     def __getitem__(self, index):
-
         # ---------
         #  Image
         # ---------
         try:
 
             img_path = self.img_files[index]
+            img_id = self.imgs_ids[index]
             # print('=================img_path====================')
+            # print(index)
             # print(img_path)
 
             img = np.array(Image.open(img_path).convert('RGB'), dtype=np.uint8)
@@ -246,10 +193,6 @@ class ListDataset(Dataset):
                 boxes = np.loadtxt(label_path).reshape(-1, 5)
             '''
             boxes = self.label_files[index]
-            # print('-----------------')
-            # print(boxes.shape)
-
-
         except Exception:
             # print(f"Could not read label '{label_path}'.")
             return
@@ -268,8 +211,8 @@ class ListDataset(Dataset):
             except Exception:
                 print("Could not apply transform.")
                 return
-
-        return img_path, img, bb_targets
+        # print(img_id)
+        return img_id, img, bb_targets
 
     def collate_fn(self, batch):
         self.batch_count += 1
@@ -292,7 +235,11 @@ class ListDataset(Dataset):
             boxes[:, 0] = i
         bb_targets = torch.cat(bb_targets, 0)
 
-        return imgs, bb_targets
+        # print('aegsdfgasfg')
+        # print(bb_targets.shape)
+        # print(bb_targets)
+
+        return imgs, bb_targets, paths
 
     def __len__(self):
         return len(self.img_files)

@@ -1,7 +1,9 @@
 # import imgaug.augmenters as iaa
 from torchvision import transforms
+import sys,os
+sys.path.append(os.getcwd())
 # from .transforms import ToTensor, PadSquare, RelativeLabels, AbsoluteLabels, ImgAug
-from transforms import ToTensor, RelativeLabels, AbsoluteLabels
+from models.data.datasets.transforms import ToTensor, RelativeLabels, AbsoluteLabels
 
 
 # class DefaultAug(ImgAug):

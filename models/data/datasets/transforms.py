@@ -102,7 +102,9 @@ class ToTensor(object):
 
         bb_targets = torch.zeros((len(boxes), 6))
         bb_targets[:, 1:] = transforms.ToTensor()(boxes)
-
+        # print('1111111111111111111')
+        # print(bb_targets.shape)
+        # print(bb_targets)
         return img, bb_targets
 
 
