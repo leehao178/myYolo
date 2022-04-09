@@ -160,8 +160,8 @@ def non_max_suppression(prediction, conf_thres=0.5, nms_thres=0.5):
         # Multiply conf by class conf to get combined confidence
         class_conf, class_pred = pred[:, 5:].max(1)
         pred[:, 4] *= class_conf
-        conf_thres = 0.00001
-        min_wh = 0
+        # conf_thres = 0.00001
+        # min_wh = 0
         
         # Select only suitable predictions
         i = (pred[:, 4] > conf_thres) & (pred[:, 2:4] > min_wh).all(1) & torch.isfinite(pred).all(1)

@@ -10,6 +10,8 @@ class YOLOHead(nn.Module):
         self.num_anchors = len(anchors)
         self.num_classes = num_classes
         self.nc = num_classes
+
+        # stride = 一個特徵點對應原來影像上的stride個像素點
         self.stride = stride
         self.nx = 0  # initialize number of x gridpoints
         self.ny = 0  # initialize number of y gridpoints

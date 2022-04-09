@@ -2,10 +2,10 @@ import sys,os
 sys.path.append(os.getcwd())
 import torch
 import torch.nn as nn
-from models.backbones.darknet import Darknet53
+from models.backbones.darknet import Darknet53, Conv2d
 from models.necks.fpn import YOLOFPN
 from models.heads.yolo import YOLOHead
-
+import numpy as np
 
 class YOLOv3(nn.Module):
     """
@@ -25,14 +25,16 @@ class YOLOv3(nn.Module):
         self.fpn = YOLOFPN(in_channels=[1024, 512, 256], out_channels=out_channels)
 
         # small
-        self.head_s = YOLOHead(num_classes=num_classes, anchors=anchors[0], stride=strides[0], img_size=img_size)
+        self.head_s = YOLOHead(num_classes=num_classes, anchors=anchors[0, :, :], stride=strides[0], img_size=img_size)
         # medium
-        self.head_m = YOLOHead(num_classes=num_classes, anchors=anchors[1], stride=strides[1], img_size=img_size)
+        self.head_m = YOLOHead(num_classes=num_classes, anchors=anchors[1, :, :], stride=strides[1], img_size=img_size)
         # large
-        self.head_l = YOLOHead(num_classes=num_classes, anchors=anchors[2], stride=strides[2], img_size=img_size)
+        self.head_l = YOLOHead(num_classes=num_classes, anchors=anchors[2, :, :], stride=strides[2], img_size=img_size)
 
         if init_weights:
             self.__init_weights()
+        else:
+            self.load_darknet_weights()
 
 
     def forward(self, x):
@@ -93,11 +95,11 @@ class YOLOv3(nn.Module):
 
                 print("initing {}".format(m))
 
-'''
 
-    def load_darknet_weights(self, weight_file, cutoff=52):
+
+    def load_darknet_weights(self, weight_file='', cutoff=52):
         "https://github.com/ultralytics/yolov3/blob/master/models.py"
-
+        weight_file = '/home/lab602.demo/.pipeline/10678031/myYolo/outputs/yolov3.weights'
         print("load darknet weights : ", weight_file)
 
         with open(weight_file, 'rb') as f:
@@ -106,16 +108,19 @@ class YOLOv3(nn.Module):
         count = 0
         ptr = 0
         for m in self.modules():
-            if isinstance(m, Convolutional):
+            # print(m)
+            if isinstance(m, Conv2d):
                 # only initing backbone conv's weights
                 if count == cutoff:
                     break
                 count += 1
 
-                conv_layer = m._Convolutional__conv
-                if m.norm == "bn":
+                conv_layer = m.conv
+                
+                if m.bn == "bn":
                     # Load BN bias, weights, running mean and running variance
-                    bn_layer = m._Convolutional__norm
+                    bn_layer = m.bn
+                    print(bn_layer.bias)
                     num_b = bn_layer.bias.numel()  # Number of biases
                     # Bias
                     bn_b = torch.from_numpy(weights[ptr:ptr + num_b]).view_as(bn_layer.bias.data)
@@ -137,6 +142,7 @@ class YOLOv3(nn.Module):
                     print("loading weight {}".format(bn_layer))
                 else:
                     # Load conv. bias
+                    print(conv_layer.bias)
                     num_b = conv_layer.bias.numel()
                     conv_b = torch.from_numpy(weights[ptr:ptr + num_b]).view_as(conv_layer.bias.data)
                     conv_layer.bias.data.copy_(conv_b)
@@ -148,7 +154,7 @@ class YOLOv3(nn.Module):
                 ptr += num_w
 
                 print("loading weight {}".format(conv_layer))
-'''
+
 
 if __name__ == "__main__":
     # from torchsummary import summary

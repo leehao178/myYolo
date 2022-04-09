@@ -2,6 +2,7 @@ import os
 import argparse
 import time
 import shutil
+import cv2
 import torch
 from torch import nn
 from models.heads.classifier import Classifier
@@ -9,7 +10,7 @@ from torch.utils.tensorboard import SummaryWriter
 from torch.optim.lr_scheduler import StepLR
 import datetime
 from models.data.datasets.dataset import Dataset
-from models.loss.loss import YoloV3Loss, compute_loss
+from models.loss.loss import compute_loss
 from models.detector import YOLOv3
 from models.eval.evaluator import Evaluator
 # python -m torch.distributed.launch --nproc_per_node=3 train.py
@@ -30,7 +31,7 @@ parser.add_argument('--start-epoch', default=0, type=int, metavar='N',
                     help='manual epoch number (useful on restarts)')
 parser.add_argument('--workers', default=3, type=int, metavar='N',
                     help='number of data loading workers (default: 4)')
-parser.add_argument('--lr', '--learning-rate', default=0.01, type=float,
+parser.add_argument('--lr', '--learning-rate', default=0.0001, type=float,
                     metavar='LR', help='initial learning rate', dest='lr')
 parser.add_argument('--momentum', default=0.9, type=float, metavar='M',
                     help='momentum')
@@ -70,9 +71,9 @@ def main():
             device = torch.device('cuda:{}'.format(args.gpu) if True else 'cpu')
             print("Use GPU: {} for training".format(args.gpu))
 
-    ANCHORS = [[(1.25, 1.625), (2.0, 3.75), (4.125, 2.875)],  # Anchors for small obj
-                [(1.875, 3.8125), (3.875, 2.8125), (3.6875, 7.4375)],  # Anchors for medium obj
-                [(3.625, 2.8125), (4.875, 6.1875), (11.65625, 10.1875)]]# Anchors for big obj
+    ANCHORS = [[(10,13), (16,30), (33,23)],  # Anchors for small obj
+                [(30,61, ), (62,45), (59,119)],  # Anchors for medium obj
+                [(116,90), (156,198), (373,326)]]# Anchors for big obj
     STRIDES = [8, 16, 32]
     ANCHORS_PER_SCLAE = 3
 
@@ -105,7 +106,7 @@ def main():
                                 momentum=args.momentum,
                                 weight_decay=args.weight_decay)
     
-    scheduler_LR = StepLR(optimizer, step_size=1, gamma=0.1)
+    scheduler_LR = StepLR(optimizer, step_size=1, gamma=0.92)
     
     outputs = './outputs/{}'.format(args.name)
     
@@ -147,13 +148,17 @@ def main():
         # adjust_learning_rate(optimizer, epoch, args)
 
         # train for one epoch
-        losses = train(train_loader, model, optimizer, epoch, args, local_rank, max_iter, args.epochs)
+        losses, xy_loss, wh_loss, obj_loss, cls_loss = train(train_loader, model, optimizer, epoch, args, local_rank, max_iter, args.epochs)
         if local_rank == 0:
             tblogger.add_scalar("train/loss", losses, epoch + 1)
+            tblogger.add_scalar("train/xy_loss", xy_loss, epoch + 1)
+            tblogger.add_scalar("train/wh_loss", wh_loss, epoch + 1)
+            tblogger.add_scalar("train/obj_loss", obj_loss, epoch + 1)
+            tblogger.add_scalar("train/cls_loss", cls_loss, epoch + 1)
             tblogger.add_scalar("train/learning_rate", optimizer.param_groups[0]['lr'], epoch + 1)
         
         if local_rank == 0:
-            if epoch % 1 == 0:
+            if epoch + 1 % 20 == 0:
                 mAP = 0
                 print('*'*20+"Validate"+'*'*20)
                 with torch.no_grad():
@@ -163,6 +168,7 @@ def main():
                         mAP += APs[i]
                     # num_classes = 20
                     mAP = mAP / 20
+                    tblogger.add_scalar("train/mAP", mAP, epoch + 1)
                     print('mAP:%g'%(mAP))
 
         # evaluate on validation set
@@ -173,13 +179,15 @@ def main():
         # remember best acc@1 and save checkpoint
         # is_best = acc1 > best_acc1
         # best_acc1 = max(acc1, best_acc1)
-        # if local_rank == 0:
-        #     save_checkpoint({
-        #         'epoch': epoch + 1,
-        #         'state_dict': model.state_dict(),
-        #         'best_acc1': best_acc1,
-        #         'optimizer': optimizer.state_dict(),
-        #     }, is_best, outputs=outputs, epoch=epoch+1)
+        is_best = False
+        if local_rank == 0:
+            if epoch + 1 % 10 == 0:
+                save_checkpoint({
+                    'epoch': epoch + 1,
+                    'model': model.module.state_dict() if type(
+                                model) is nn.parallel.DistributedDataParallel else model.state_dict(),
+                    'optimizer': optimizer.state_dict(),
+                }, is_best, outputs=outputs, epoch=epoch + 1)
         scheduler_LR.step()
 
 def save_checkpoint(state, is_best, outputs='', epoch=''):
@@ -192,34 +200,50 @@ def train(train_loader, model, optimizer, epoch, args, rank, max_iter, max_epoch
     batch_time = AverageMeter()
     data_time = AverageMeter()
     losses = AverageMeter()
-    top1 = AverageMeter()
-    top5 = AverageMeter()
+    xy_loss = AverageMeter()
+    wh_loss = AverageMeter()
+    obj_loss = AverageMeter()
+    cls_loss = AverageMeter()
 
     # switch to train mode
     model.train()
 
     end = time.time()
 
-    for i, (input, target, paths) in enumerate(train_loader):
+    for i, (imgs, target, paths) in enumerate(train_loader):
         # measure data loading time
         data_time.update(time.time() - end)
+        # imgpath ='/home/lab602.demo/.pipeline/10678031/myYolo/outputs/voc/results/img2'
+        
+        # for index, img in enumerate(imgs):
+        #     print(type(img))
+        #     print(img.shape)
+        #     cv2.imwrite(os.path.join(imgpath, '{}.jpg'.format(paths[index])), img)
+        #     input('test')
+
+
 
         if args.gpu is not None:
-            input = input.cuda()
+            imgs = imgs.cuda()
         target = target.cuda()
 
         # compute output
-        output = model(input)
+        output = model(imgs)
         # print('-------------train-----------------')
         # print(output.shape)
         # loss = criterion(output, target)
         loss, loss_components = compute_loss(output, target, model)
+        # print(loss_components.shape)
 
         # measure accuracy and record loss
         # acc1, acc5 = accuracy(output, target, topk=(1, 5))
-        losses.update(loss.item(), input.size(0))
-        # top1.update(acc1[0], input.size(0))
-        # top5.update(acc5[0], input.size(0))
+        losses.update(loss.item(), imgs.size(0))
+        xy_loss.update(loss_components[0].item(), imgs.size(0))
+        wh_loss.update(loss_components[1].item(), imgs.size(0))
+        obj_loss.update(loss_components[2].item(), imgs.size(0))
+        cls_loss.update(loss_components[3].item(), imgs.size(0))
+        # top1.update(acc1[0], img.size(0))
+        # top5.update(acc5[0], img.size(0))
 
         # compute gradient and do SGD step
         optimizer.zero_grad()
@@ -240,10 +264,18 @@ def train(train_loader, model, optimizer, epoch, args, rank, max_iter, max_epoch
                     'Time {batch_time.val:.3f} ({batch_time.avg:.3f})\t'
                     'Data {data_time.val:.3f} ({data_time.avg:.3f})\t'
                     'Learing Rate {LR}\t'
-                    'Loss {loss.val:.4f} ({loss.avg:.4f})'.format(
+                    'Loss {loss.val:.4f} ({loss.avg:.4f})\t'
+                    'xy_loss: {xy_loss.val:.3f}\t'
+                    'wh_loss: {wh_loss.val:.3f}\t'
+                    'obj_loss: {obj_loss.val:.3f}\t'
+                    'cls_loss: {cls_loss.val:.3f}'.format(
                     epoch+1, i, len(train_loader), eta=datetime.timedelta(seconds=int(eta_seconds)), batch_time=batch_time,
-                    data_time=data_time, loss=losses, LR=optimizer.param_groups[0]['lr']))
-    return losses.avg
+                    data_time=data_time, loss=losses, LR=optimizer.param_groups[0]['lr'],
+                    xy_loss=xy_loss,
+                    wh_loss=wh_loss,
+                    obj_loss=obj_loss,
+                    cls_loss=cls_loss))
+    return losses.avg, xy_loss.avg, wh_loss.avg, obj_loss.avg, cls_loss.avg
 
 def accuracy(output, target, topk=(1,)):
     """Computes the accuracy over the k top predictions for the specified values of k"""

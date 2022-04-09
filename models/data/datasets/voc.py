@@ -10,51 +10,13 @@ from PIL import Image
 from PIL import ImageFile
 import os.path as osp
 import xml.etree.ElementTree as ET
-
+import cv2
 ImageFile.LOAD_TRUNCATED_IMAGES = True
-
-
-def pad_to_square(img, pad_value):
-    c, h, w = img.shape
-    dim_diff = np.abs(h - w)
-    # (upper / left) padding and (lower / right) padding
-    pad1, pad2 = dim_diff // 2, dim_diff - dim_diff // 2
-    # Determine padding
-    pad = (0, 0, pad1, pad2) if h <= w else (pad1, pad2, 0, 0)
-    # Add padding
-    img = F.pad(img, pad, "constant", value=pad_value)
-
-    return img, pad
 
 
 def resize(image, size):
     image = F.interpolate(image.unsqueeze(0), size=size, mode="nearest").squeeze(0)
     return image
-
-
-class ImageFolder(Dataset):
-    def __init__(self, folder_path, transform=None):
-        self.files = sorted(glob.glob("%s/*.*" % folder_path))
-        self.transform = transform
-
-    def __getitem__(self, index):
-
-        img_path = self.files[index % len(self.files)]
-        img = np.array(
-            Image.open(img_path).convert('RGB'),
-            dtype=np.uint8)
-
-        # Label Placeholder
-        boxes = np.zeros((1, 5))
-
-        # Apply transforms
-        if self.transform:
-            img, _ = self.transform((img, boxes))
-
-        return img_path, img
-
-    def __len__(self):
-        return len(self.files)
 
 class ListDataset(Dataset):
     def __init__(self, list_path, img_size=416, multiscale=True, transform=None, years=['VOC2007', 'VOC2012'], traintype='train'):
@@ -79,6 +41,9 @@ class ListDataset(Dataset):
                 labels = []
                 bboxes_ignore = []
                 labels_ignore = []
+                target_img_size = root.find('size')
+                width = int(target_img_size.find('width').text)
+                height = int(target_img_size.find('height').text)
                 for obj in root.findall('object'):
                     name = obj.find('name').text
                     if name not in self.CLASSES:
@@ -99,10 +64,10 @@ class ListDataset(Dataset):
                     y = ymin + h*0.5
                     bbox = [
                         label,
-                        x,
-                        y,
-                        w,
-                        h,
+                        x/width,
+                        y/height,
+                        w/width,
+                        h/height,
                         
                     ]
                     bboxes.append(bbox)
@@ -142,19 +107,6 @@ class ListDataset(Dataset):
                 #     labels_ignore=labels_ignore.astype(np.int64))
                 # return ann
 
-        # with open(list_path, "r") as file:
-        #     self.img_files = file.readlines()
-
-        # self.label_files = []
-        # for path in self.img_files:
-        #     image_dir = os.path.dirname(path)
-        #     label_dir = "labels".join(image_dir.rsplit("images", 1))
-        #     assert label_dir != image_dir, \
-        #         f"Image path must contain a folder named 'images'! \n'{image_dir}'"
-        #     label_file = os.path.join(label_dir, os.path.basename(path))
-        #     label_file = os.path.splitext(label_file)[0] + '.txt'
-        #     self.label_files.append(label_file)
-
         self.img_size = img_size
         self.max_objects = 100
         self.multiscale = multiscale
@@ -164,54 +116,30 @@ class ListDataset(Dataset):
         self.transform = transform
 
     def __getitem__(self, index):
-        # ---------
-        #  Image
-        # ---------
+        # ---------Images---------
         try:
-
             img_path = self.img_files[index]
             img_id = self.imgs_ids[index]
-            # print('=================img_path====================')
-            # print(index)
-            # print(img_path)
-
             img = np.array(Image.open(img_path).convert('RGB'), dtype=np.uint8)
         except Exception:
             print(f"Could not read image '{img_path}'.")
             return
 
-        # ---------
-        #  Label
-        # ---------
+        # TODO warning empty labels
+        # ---------Labels---------
         try:
-            '''
-            label_path = self.label_files[index % len(self.img_files)].rstrip()
-
-            # Ignore warning if file is empty
-            with warnings.catch_warnings():
-                warnings.simplefilter("ignore")
-                boxes = np.loadtxt(label_path).reshape(-1, 5)
-            '''
             boxes = self.label_files[index]
         except Exception:
             # print(f"Could not read label '{label_path}'.")
             return
 
-        # -----------
-        #  Transform
-        # -----------
+        # -------Transforms-------
         if self.transform:
             try:
-                # print('-----------------')
-                # print(img.shape)
-                # print(boxes.shape)
-                # print(boxes)
-
                 img, bb_targets = self.transform((img, boxes))
             except Exception:
                 print("Could not apply transform.")
                 return
-        # print(img_id)
         return img_id, img, bb_targets
 
     def collate_fn(self, batch):
@@ -235,9 +163,14 @@ class ListDataset(Dataset):
             boxes[:, 0] = i
         bb_targets = torch.cat(bb_targets, 0)
 
-        # print('aegsdfgasfg')
-        # print(bb_targets.shape)
-        # print(bb_targets)
+        # imgpath ='/home/lab602.demo/.pipeline/10678031/myYolo/outputs/voc/results/img2'
+        
+        # for index, img in enumerate(imgs):
+        #     print(img)
+        #     # print(img.permute(1, 2, 0).shape)
+        #     img = img.permute(2, 1, 0).cpu().detach().numpy()
+        #     cv2.imwrite(os.path.join(imgpath, '{}.jpg'.format(paths[index])), img)
+        #     input('test')
 
         return imgs, bb_targets, paths
 
