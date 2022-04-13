@@ -100,10 +100,19 @@ class Evaluator(object):
                     # print(len(i))
                     img_ind = 0
                     xmin, ymin, xmax, ymax, conf, score2, cls = i
-                    xmin = ((xmin - padw) / ratiow) / w
-                    ymin = ((ymin - padh) / ratioh) / h
-                    xmax = ((xmax - padw) / ratiow) / w
-                    ymax = ((ymax - padh) / ratioh) / h
+                    xmin = (xmin - padw) / ratiow
+                    ymin = (ymin - padh) / ratioh
+                    xmax = (xmax - padw) / ratiow
+                    ymax = (ymax - padh) / ratioh
+
+                    # x = (xmin - padw) / ratiow
+                    # y = (ymin - padh) / ratioh
+                    # w = (xmax - padw) / ratiow
+                    # h = (ymax - padh) / ratioh
+                    # xmin = x - w*0.5
+                    # ymin = y - h*0.5
+                    # xmax = x + w*0.5
+                    # ymax = y + h*0.5
 
 
                     color = (_COLORS[int(cls.cpu())] * 255).astype(np.uint8).tolist()
