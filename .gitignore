@@ -1,4 +1,6 @@
 # detection
+*.pth
+dog_*
 .vscode/
 outputs/
 # Byte-compiled / optimized / DLL files

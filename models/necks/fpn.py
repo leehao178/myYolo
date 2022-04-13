@@ -36,44 +36,44 @@ class YOLOFPN(nn.Module):
         super(YOLOFPN, self).__init__()
         # large
         # FPN0 = 13*13*75
-        self.large_conv1 = Conv2d(in_channels=in_channels[0], out_channels=512, kernel_size=1, stride=1, padding=0)
-        self.large_conv2 = Conv2d(in_channels=512, out_channels=1024, kernel_size=3, stride=1, padding=1)
-        self.large_conv3 = Conv2d(in_channels=1024, out_channels=512, kernel_size=1, stride=1, padding=0)
-        self.large_conv4 = Conv2d(in_channels=512, out_channels=1024, kernel_size=3, stride=1, padding=1)
-        self.large_conv5 = Conv2d(in_channels=1024, out_channels=512, kernel_size=1, stride=1, padding=0)
+        self.large_conv1 = Conv2d(in_channels=in_channels[0], out_channels=512, kernel_size=1, stride=1, padding=0, bn='bn')
+        self.large_conv2 = Conv2d(in_channels=512, out_channels=1024, kernel_size=3, stride=1, padding=1, bn='bn')
+        self.large_conv3 = Conv2d(in_channels=1024, out_channels=512, kernel_size=1, stride=1, padding=0, bn='bn')
+        self.large_conv4 = Conv2d(in_channels=512, out_channels=1024, kernel_size=3, stride=1, padding=1, bn='bn')
+        self.large_conv5 = Conv2d(in_channels=1024, out_channels=512, kernel_size=1, stride=1, padding=0, bn='bn')
 
-        self.large_conv6 = Conv2d(in_channels=512, out_channels=1024, kernel_size=3, stride=1, padding=1)
-        self.large_conv7 = nn.Conv2d(in_channels=1024, out_channels=out_channels, kernel_size=1, stride=1, padding=0)
+        self.large_conv6 = Conv2d(in_channels=512, out_channels=1024, kernel_size=3, stride=1, padding=1, bn='bn')
+        self.large_conv7 = Conv2d(in_channels=1024, out_channels=out_channels, kernel_size=1, stride=1, padding=0)
 
         # medium
         # FPN1 = 26*26*75
-        self.medium_conv1 = Conv2d(in_channels=512, out_channels=256, kernel_size=1, stride=1, padding=0)
+        self.medium_conv1 = Conv2d(in_channels=512, out_channels=256, kernel_size=1, stride=1, padding=0, bn='bn')
         self.upsample1 = Upsample(scale_factor=2)
         self.route1 = Route()
 
-        self.medium_conv2 = Conv2d(in_channels=int(in_channels[1]*1.5), out_channels=256, kernel_size=1, stride=1, padding=0)
-        self.medium_conv3 = Conv2d(in_channels=256, out_channels=512, kernel_size=3, stride=1, padding=1)
-        self.medium_conv4 = Conv2d(in_channels=512, out_channels=256, kernel_size=1, stride=1, padding=0)
-        self.medium_conv5 = Conv2d(in_channels=256, out_channels=512, kernel_size=3, stride=1, padding=1)
-        self.medium_conv6 = Conv2d(in_channels=512, out_channels=256, kernel_size=1, stride=1, padding=0)
+        self.medium_conv2 = Conv2d(in_channels=int(in_channels[1]*1.5), out_channels=256, kernel_size=1, stride=1, padding=0, bn='bn')
+        self.medium_conv3 = Conv2d(in_channels=256, out_channels=512, kernel_size=3, stride=1, padding=1, bn='bn')
+        self.medium_conv4 = Conv2d(in_channels=512, out_channels=256, kernel_size=1, stride=1, padding=0, bn='bn')
+        self.medium_conv5 = Conv2d(in_channels=256, out_channels=512, kernel_size=3, stride=1, padding=1, bn='bn')
+        self.medium_conv6 = Conv2d(in_channels=512, out_channels=256, kernel_size=1, stride=1, padding=0, bn='bn')
         
-        self.medium_conv7 = Conv2d(in_channels=256, out_channels=512, kernel_size=3, stride=1, padding=1)
-        self.medium_conv8 = nn.Conv2d(in_channels=512, out_channels=out_channels, kernel_size=1, stride=1, padding=0)
+        self.medium_conv7 = Conv2d(in_channels=256, out_channels=512, kernel_size=3, stride=1, padding=1, bn='bn')
+        self.medium_conv8 = Conv2d(in_channels=512, out_channels=out_channels, kernel_size=1, stride=1, padding=0)
 
         # small
         # FPN2 = 52*52*75
-        self.small_conv1 = Conv2d(in_channels=256, out_channels=128, kernel_size=1, stride=1, padding=0)
+        self.small_conv1 = Conv2d(in_channels=256, out_channels=128, kernel_size=1, stride=1, padding=0, bn='bn')
         self.upsample2 = Upsample(scale_factor=2)
         self.route2 = Route()
 
-        self.small_conv2 = Conv2d(in_channels=int(in_channels[2]*1.5), out_channels=128, kernel_size=1, stride=1, padding=0)
-        self.small_conv3 = Conv2d(in_channels=128, out_channels=256, kernel_size=3, stride=1, padding=1)
-        self.small_conv4 = Conv2d(in_channels=256, out_channels=128, kernel_size=1, stride=1, padding=0)
-        self.small_conv5 = Conv2d(in_channels=128, out_channels=256, kernel_size=3, stride=1, padding=1)
-        self.small_conv6 =Conv2d(in_channels=256, out_channels=128, kernel_size=1, stride=1, padding=0)
+        self.small_conv2 = Conv2d(in_channels=int(in_channels[2]*1.5), out_channels=128, kernel_size=1, stride=1, padding=0, bn='bn')
+        self.small_conv3 = Conv2d(in_channels=128, out_channels=256, kernel_size=3, stride=1, padding=1, bn='bn')
+        self.small_conv4 = Conv2d(in_channels=256, out_channels=128, kernel_size=1, stride=1, padding=0, bn='bn')
+        self.small_conv5 = Conv2d(in_channels=128, out_channels=256, kernel_size=3, stride=1, padding=1, bn='bn')
+        self.small_conv6 = Conv2d(in_channels=256, out_channels=128, kernel_size=1, stride=1, padding=0, bn='bn')
 
-        self.small_conv7 = Conv2d(in_channels=128, out_channels=256, kernel_size=3, stride=1, padding=1)
-        self.small_conv8 = nn.Conv2d(in_channels=256, out_channels=out_channels, kernel_size=1, stride=1, padding=0)
+        self.small_conv7 = Conv2d(in_channels=128, out_channels=256, kernel_size=3, stride=1, padding=1, bn='bn')
+        self.small_conv8 = Conv2d(in_channels=256, out_channels=out_channels, kernel_size=1, stride=1, padding=0)
 
     def forward(self, x0, x1, x2):  # large, medium, small
         # large

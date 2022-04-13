@@ -65,7 +65,7 @@ class Dataset:
             train_dataset = ListDataset(
                                 self.data_dir,
                                 img_size=self.img_size,
-                                multiscale=False,
+                                multiscale=True,
                                 transform=AUGMENTATION_TRANSFORMS,
                                 traintype='train')
 
@@ -79,26 +79,27 @@ class Dataset:
 
         train_sampler = None
         if self.dataset_type == 'voc':
+            pin_memory = False
             if self.isDistributed:
                 train_sampler =DistributedSampler(train_dataset)
                 train_loader = torch.utils.data.DataLoader(dataset=train_dataset,
                                 batch_size=self.batch_size,
                                 sampler=train_sampler,
-                    num_workers=self.workers, pin_memory=True, collate_fn=train_dataset.collate_fn)
+                    num_workers=self.workers, pin_memory=pin_memory, collate_fn=train_dataset.collate_fn)
 
                 val_loader = torch.utils.data.DataLoader(
                     val_dataset,
                     batch_size=self.batch_size, sampler=DistributedSampler(val_dataset),
-                    num_workers=self.workers, pin_memory=True, collate_fn=val_dataset.collate_fn)
+                    num_workers=self.workers, pin_memory=pin_memory, collate_fn=val_dataset.collate_fn)
             else:
                 train_loader = torch.utils.data.DataLoader(
                     train_dataset, batch_size=self.batch_size, shuffle= True,
-                    num_workers=self.workers, pin_memory=True, collate_fn=train_dataset.collate_fn)
+                    num_workers=self.workers, pin_memory=pin_memory, collate_fn=train_dataset.collate_fn)
 
                 val_loader = torch.utils.data.DataLoader(
                     val_dataset,
                     batch_size=self.batch_size, shuffle=False,
-                    num_workers=self.workers, pin_memory=True, collate_fn=val_dataset.collate_fn)
+                    num_workers=self.workers, pin_memory=pin_memory, collate_fn=val_dataset.collate_fn)
         else:
             if self.isDistributed:
                 train_sampler =DistributedSampler(train_dataset)

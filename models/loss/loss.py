@@ -95,19 +95,18 @@ def wh_iou(box1, box2):
     return inter_area / union_area  # iou
 
 
-hyp = {'k': 10.39,  # loss multiple
-       'xy': 4.062,  # xy loss fraction
-       'wh': 0.1845,  # wh loss fraction
-       'cls': 42.6,  # cls loss fraction
+hyp = {'giou': 1.666,  # giou loss gain
+       'xy': 4.062,  # xy loss gain
+       'wh': 0.1845,  # wh loss gain
+       'cls': 42.6,  # cls loss gain
        'cls_pw': 3.34,  # cls BCELoss positive_weight
-       'obj': 0.8409,  # conf loss fraction
+       'obj': 12.61,  # obj loss gain
        'obj_pw': 8.338,  # obj BCELoss positive_weight
-       'iou_t': 0.1287,  # iou target-anchor training threshold
-       'lr0': 0.001028,  # initial learning rate
-       'lrf': -3.441,  # final learning rate = lr0 * (10 ** lrf)
-       'momentum': 0.9127,  # SGD momentum
-       'weight_decay': 0.0004841,  # optimizer weight decay
-       }
+       'iou_t': 0.2705,  # iou target-anchor training threshold
+       'lr0': 0.001,  # initial learning rate
+       'lrf': -4.,  # final learning rate = lr0 * (10 ** lrf)
+       'momentum': 0.90,  # SGD momentum
+       'weight_decay': 0.0005}  # optimizer weight decay
 
 
 def compute_loss(pred, targets, model):  # predictions, targets, model
@@ -142,18 +141,23 @@ def compute_loss(pred, targets, model):  # predictions, targets, model
             # pi[..., 2:4] = torch.sigmoid(pi[..., 2:4])  # wh power loss (uncomment)
 
             # torch.Size([num_target, 2])
-            lxy += (k * hyp['xy']) * MSE(torch.sigmoid(pi[..., 0:2]), txy[i])  # xy loss
-            lwh += (k * hyp['wh']) * MSE(pi[..., 2:4], twh[i])  # wh yolo loss
+            lxy += MSE(torch.sigmoid(pi[..., 0:2]), txy[i])  # xy loss
+            lwh += MSE(pi[..., 2:4], twh[i])  # wh yolo loss
 
             # tclsm = torch.Size([num_target, 20])
             tclsm = torch.zeros_like(pi[..., 5:])
             tclsm[range(len(b)), tcls[i]] = 1.0
-            lcls += (k * hyp['cls']) * BCEcls(pi[..., 5:], tclsm)  # class_conf loss
+            lcls += BCEcls(pi[..., 5:], tclsm)  # class_conf loss
             # lcls += (k * hyp['cls']) * CE(pi[..., 5:], tcls[i])  # cls loss (CE)
 
         # pos_weight = ft([gp[i] / min(gp) * 4.])
         # BCE = nn.BCEWithLogitsLoss(pos_weight=pos_weight)
-        lobj += (k * hyp['obj']) * BCEobj(pi0[..., 4], tobj)  # obj_conf loss
+        lobj += BCEobj(pi0[..., 4], tobj)  # obj_conf loss
+    
+    lxy *= (k * hyp['xy'])
+    lwh *= (k * hyp['wh'])
+    lobj *= (k * hyp['cls'])
+    lcls *= (k * hyp['obj'])
     loss = lxy + lwh + lobj + lcls
 
     return loss, torch.cat((lxy, lwh, lobj, lcls, loss)).detach()
@@ -164,7 +168,7 @@ def build_targets(pred, model, targets):
     # pred = [0_batch_size, 1_self.num_anchors, 2_nG, 3_nG, 4_5+self.num_classes]
     # targets = [image, class, x(歸一後的中心), y, w（歸一後的寬）, h] [ 0.00000, 20.00000,  0.72913,  0.48770,  0.13595,  0.08381]
     # iou_thres = model.hyp['iou_t']  # hyperparameter
-    iou_thres = 0.2705
+    iou_thres = 0.5
     # if type(model) in (nn.parallel.DataParallel, nn.parallel.DistributedDataParallel):
     #     model = model.module
 

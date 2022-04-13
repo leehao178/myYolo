@@ -5,9 +5,8 @@ import shutil
 import cv2
 import torch
 from torch import nn
-from models.heads.classifier import Classifier
 from torch.utils.tensorboard import SummaryWriter
-from torch.optim.lr_scheduler import StepLR
+from torch.optim.lr_scheduler import StepLR, MultiStepLR
 import datetime
 from models.data.datasets.dataset import Dataset
 from models.loss.loss import compute_loss
@@ -25,20 +24,20 @@ parser.add_argument('--img_size', default=416,
                     type=int,
                     help='path to dataset')
 parser.add_argument('--resume', default='', type=str, metavar='PATH', help='path to latest checkpoint (default: none)')
-parser.add_argument('--epochs', default=100, type=int, metavar='N',
+parser.add_argument('--epochs', default=50, type=int, metavar='N',
                     help='number of total epochs to run')
 parser.add_argument('--start-epoch', default=0, type=int, metavar='N',
                     help='manual epoch number (useful on restarts)')
 parser.add_argument('--workers', default=3, type=int, metavar='N',
                     help='number of data loading workers (default: 4)')
-parser.add_argument('--lr', '--learning-rate', default=0.0001, type=float,
+parser.add_argument('--lr', '--learning-rate', default=0.003, type=float,
                     metavar='LR', help='initial learning rate', dest='lr')
 parser.add_argument('--momentum', default=0.9, type=float, metavar='M',
                     help='momentum')
-parser.add_argument('--wd', '--weight-decay', default=1e-4, type=float,
+parser.add_argument('--wd', '--weight-decay', default=5e-4, type=float,
                     metavar='W', help='weight decay (default: 1e-4)',
                     dest='weight_decay')
-parser.add_argument('-b', '--batch-size', default=16, type=int,
+parser.add_argument('-b', '--batch-size', default=8, type=int,
                     metavar='N',
                     help='mini-batch size (default: 128), this is the total '
                          'batch size of all GPUs on the current node when '
@@ -54,7 +53,7 @@ parser.add_argument("--local_rank", type=int, default=0,
 def main():
     args = parser.parse_args()
     os.environ['CUDA_VISIBLE_DEVICES'] = '0,1,2'
-    milti_gpus = False
+    milti_gpus = True
     if milti_gpus:
         # 1) 初始化
         torch.distributed.init_process_group(backend="nccl")
@@ -78,7 +77,8 @@ def main():
     ANCHORS_PER_SCLAE = 3
 
     model = YOLOv3(anchors=torch.FloatTensor(ANCHORS).to(device),
-                   strides=torch.FloatTensor(STRIDES).to(device), img_size=416)
+                   strides=torch.FloatTensor(STRIDES).to(device),
+                   init_weights=False)
 
     if milti_gpus:
         # 4) 封裝之前要把模型移到對應的gpu
@@ -92,11 +92,7 @@ def main():
     else:
         if args.gpu is not None:
             model.cuda(args.gpu)
-    # ANCHORS = [[(1.25, 1.625), (2.0, 3.75), (4.125, 2.875)],  # Anchors for small obj
-    #         [(1.875, 3.8125), (3.875, 2.8125), (3.6875, 7.4375)],  # Anchors for medium obj
-    #         [(3.625, 2.8125), (4.875, 6.1875), (11.65625, 10.1875)]] ,# Anchors for big obj
-    # STRIDES = [8, 16, 32]
-    # IOU_THRESHOLD_LOSS = 0.5
+
     # define loss function (criterion) and optimizer
     # criterion = YoloV3Loss(anchors=ANCHORS, strides=STRIDES,
     #                                 iou_threshold_loss=IOU_THRESHOLD_LOSS)
@@ -106,7 +102,8 @@ def main():
                                 momentum=args.momentum,
                                 weight_decay=args.weight_decay)
     
-    scheduler_LR = StepLR(optimizer, step_size=1, gamma=0.92)
+    # scheduler_LR = StepLR(optimizer, step_size=40, gamma=0.1)
+    scheduler_LR = MultiStepLR(optimizer, milestones=[40, 45], gamma=0.1)
     
     outputs = './outputs/{}'.format(args.name)
     
@@ -146,7 +143,7 @@ def main():
             # 使多顯卡訓練的訓練資料洗牌
             train_sampler.set_epoch(epoch)
         # adjust_learning_rate(optimizer, epoch, args)
-
+        
         # train for one epoch
         losses, xy_loss, wh_loss, obj_loss, cls_loss = train(train_loader, model, optimizer, epoch, args, local_rank, max_iter, args.epochs)
         if local_rank == 0:
@@ -158,7 +155,10 @@ def main():
             tblogger.add_scalar("train/learning_rate", optimizer.param_groups[0]['lr'], epoch + 1)
         
         if local_rank == 0:
-            if epoch + 1 % 20 == 0:
+            # print('123123123')
+            # print(epoch)
+            # print((epoch + 1) % 2)
+            if (epoch + 1) % 20 == 0:
                 mAP = 0
                 print('*'*20+"Validate"+'*'*20)
                 with torch.no_grad():
@@ -168,7 +168,7 @@ def main():
                         mAP += APs[i]
                     # num_classes = 20
                     mAP = mAP / 20
-                    tblogger.add_scalar("train/mAP", mAP, epoch + 1)
+                    tblogger.add_scalar("val/mAP", mAP, epoch + 1)
                     print('mAP:%g'%(mAP))
 
         # evaluate on validation set
@@ -181,7 +181,7 @@ def main():
         # best_acc1 = max(acc1, best_acc1)
         is_best = False
         if local_rank == 0:
-            if epoch + 1 % 10 == 0:
+            if (epoch + 1) % 10 == 0:
                 save_checkpoint({
                     'epoch': epoch + 1,
                     'model': model.module.state_dict() if type(
@@ -221,6 +221,7 @@ def train(train_loader, model, optimizer, epoch, args, rank, max_iter, max_epoch
         #     cv2.imwrite(os.path.join(imgpath, '{}.jpg'.format(paths[index])), img)
         #     input('test')
 
+        _, _, w, h = imgs.shape
 
 
         if args.gpu is not None:
@@ -263,14 +264,15 @@ def train(train_loader, model, optimizer, epoch, args, rank, max_iter, max_epoch
                     'ETA: {eta}\t'
                     'Time {batch_time.val:.3f} ({batch_time.avg:.3f})\t'
                     'Data {data_time.val:.3f} ({data_time.avg:.3f})\t'
-                    'Learing Rate {LR}\t'
+                    'img_size: {img_size}\t'
+                    'Learing Rate {LR:.4f}\t'
                     'Loss {loss.val:.4f} ({loss.avg:.4f})\t'
                     'xy_loss: {xy_loss.val:.3f}\t'
                     'wh_loss: {wh_loss.val:.3f}\t'
                     'obj_loss: {obj_loss.val:.3f}\t'
                     'cls_loss: {cls_loss.val:.3f}'.format(
                     epoch+1, i, len(train_loader), eta=datetime.timedelta(seconds=int(eta_seconds)), batch_time=batch_time,
-                    data_time=data_time, loss=losses, LR=optimizer.param_groups[0]['lr'],
+                    data_time=data_time, img_size='{}x{}'.format(w, h), loss=losses, LR=optimizer.param_groups[0]['lr'],
                     xy_loss=xy_loss,
                     wh_loss=wh_loss,
                     obj_loss=obj_loss,
