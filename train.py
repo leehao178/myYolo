@@ -12,6 +12,9 @@ from models.data.datasets.dataset import Dataset
 from models.loss.loss import compute_loss
 from models.detector import YOLOv3
 from models.eval.evaluator import Evaluator
+from loguru import logger
+
+
 # python -m torch.distributed.launch --nproc_per_node=3 train.py
 # '/home/lab602.demo/.pipeline/datasets/VOCdevkit'
 parser = argparse.ArgumentParser(description='Netowks Object Detection Training')
@@ -54,6 +57,8 @@ parser.add_argument("--pretrained", type=str, default='outputs/yolov3.weights',
 
 def main():
     args = parser.parse_args()
+    logger.add('outputs/voc/train_log.txt', encoding='utf-8', enqueue=True)
+    
     os.environ['CUDA_VISIBLE_DEVICES'] = '0,1,2'
     milti_gpus = True
     if milti_gpus:
@@ -70,7 +75,8 @@ def main():
             local_rank = 0
             torch.cuda.set_device(args.gpu)
             device = torch.device('cuda:{}'.format(args.gpu) if True else 'cpu')
-            print("Use GPU: {} for training".format(args.gpu))
+            logger.info('Use GPU: {} for training'.format(args.gpu))
+
 
     ANCHORS = [[(10,13), (16,30), (33,23)],  # Anchors for small obj
                 [(30,61, ), (62,45), (59,119)],  # Anchors for medium obj
@@ -290,7 +296,7 @@ def train(train_loader, model, optimizer, epoch, args, rank, max_iter, max_epoch
                 left_iter = max_iter - i + 1
                 
                 eta_seconds = ((max_epoch - epoch + 1) * max_iter *  batch_time.avg) + left_iter *  batch_time.avg
-                print('Epoch: [{0}][{1}/{2}]\t'
+                logger.info('Epoch: [{0}][{1}/{2}]\t'
                     'ETA: {eta}\t'
                     'Time {batch_time.val:.3f} ({batch_time.avg:.3f})\t'
                     'Data {data_time.val:.3f} ({data_time.avg:.3f})\t'
@@ -327,48 +333,6 @@ def accuracy(output, target, topk=(1,)):
             correct_k = correct[:k].reshape(-1).float().sum(0, keepdim=True)
             res.append(correct_k.mul_(100.0 / batch_size))
         return res
-
-
-def validate(val_loader, model, criterion, args, device, rank):
-    batch_time = AverageMeter()
-    losses = AverageMeter()
-    top1 = AverageMeter()
-    top5 = AverageMeter()
-
-    # switch to evaluate mode
-    model.eval()
-
-    with torch.no_grad():
-        end = time.time()
-        for i, (input, target) in enumerate(val_loader):
-            if args.gpu is not None:
-                input = input.cuda()
-            target = target.cuda()
-
-            # compute output
-            output = model(input)
-            loss, loss_components = compute_loss(output, target)
-
-            # measure accuracy and record loss
-            # acc1, acc5 = accuracy(output, target, topk=(1, 5))
-            losses.update(loss.item(), input.size(0))
-            # top1.update(acc1[0], input.size(0))
-            # top5.update(acc5[0], input.size(0))
-
-            # measure elapsed time
-            batch_time.update(time.time() - end)
-            end = time.time()
-            if rank == 0:
-                if i % args.print_freq == 0:
-                    print('Test: [{0}/{1}]\t'
-                        'Time {batch_time.val:.3f} ({batch_time.avg:.3f})\t'
-                        'Loss {loss.val:.4f} ({loss.avg:.4f})'.format(
-                        i, len(val_loader), batch_time=batch_time, loss=losses))
-        if rank == 0:
-            print(' * Acc@1 {top1.avg:.3f} Acc@5 {top5.avg:.3f}'
-                .format(top1=top1, top5=top5))
-
-    return top1.avg
 
 class AverageMeter(object):
     """Computes and stores the average and current value"""

@@ -20,7 +20,6 @@ class Evaluator(object):
         self.outputs_path = '/home/lab602.demo/.pipeline/10678031/myYolo/outputs/voc'
         self.pred_result_path = os.path.join('/home/lab602.demo/.pipeline/10678031/myYolo/outputs/voc', 'results')
         self.val_data_path_07 = os.path.join('/home/lab602.demo/.pipeline/datasets/VOCdevkit', 'VOC2007')
-        self.val_data_path_12 = os.path.join('/home/lab602.demo/.pipeline/datasets/VOCdevkit', 'VOC2012')
         self.conf_thresh = conf_thres
         self.nms_thresh = nms_thresh
         self.test_size =  test_size
@@ -29,7 +28,6 @@ class Evaluator(object):
         self.device = next(model.parameters()).device
         self.epoch = epoch
 
-        
 
     def APs_voc(self, multi_test=False, flip_test=False, save_json=False):
         self.model.eval()
@@ -152,12 +150,10 @@ class Evaluator(object):
         cachedir = os.path.join(self.pred_result_path, 'cache')
         annopath = os.path.join(self.val_data_path_07, 'Annotations', '{:s}.xml')
         imagesetfile = os.path.join(self.val_data_path_07,  'ImageSets', 'Main', 'test.txt')
-        
-        annopath2 = os.path.join(self.val_data_path_07, 'Annotations', '{:s}.xml')
-        imagesetfile2 = os.path.join(self.val_data_path_07,  'ImageSets', 'Main', 'test.txt')
+
         APs = {}
         for i, cls in enumerate(self.classes):
-            R, P, AP = voc_eval(filename, annopath, imagesetfile, annopath2, imagesetfile2, cls, cachedir, iou_thresh, use_07_metric)
+            R, P, AP = voc_eval(filename, annopath, imagesetfile, cls, cachedir, iou_thresh, use_07_metric)
             APs[cls] = AP
         if os.path.exists(cachedir):
             shutil.rmtree(cachedir)
