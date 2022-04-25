@@ -119,8 +119,11 @@ def compute_loss(pred, targets, model):  # predictions, targets, model
     MSE = nn.MSELoss()
     # CE = nn.CrossEntropyLoss()
     # BCE = nn.BCEWithLogitsLoss()
-    BCEcls = nn.BCEWithLogitsLoss(pos_weight=ft([hyp['cls_pw']]))
-    BCEobj = nn.BCEWithLogitsLoss(pos_weight=ft([hyp['obj_pw']]))
+    # BCEcls = nn.BCEWithLogitsLoss(pos_weight=ft([hyp['cls_pw']]))
+    # BCEobj = nn.BCEWithLogitsLoss(pos_weight=ft([hyp['obj_pw']]))
+
+    BCEcls = nn.BCEWithLogitsLoss()
+    BCEobj = nn.BCEWithLogitsLoss()
 
     # Compute losses
     # h = model.hyp  # hyperparameters
@@ -154,10 +157,15 @@ def compute_loss(pred, targets, model):  # predictions, targets, model
         # BCE = nn.BCEWithLogitsLoss(pos_weight=pos_weight)
         lobj += BCEobj(pi0[..., 4], tobj)  # obj_conf loss
     
-    lxy *= (k * hyp['xy'])
-    lwh *= (k * hyp['wh'])
-    lobj *= (k * hyp['cls'])
-    lcls *= (k * hyp['obj'])
+    # lxy *= (k * hyp['xy'])
+    # lwh *= (k * hyp['wh'])
+    # lobj *= (k * hyp['cls'])
+    # lcls *= (k * hyp['obj'])
+
+    lxy *= 0.1
+    lwh *= 0.2
+    lobj *= 1.0
+    lcls *= 0.5
     loss = lxy + lwh + lobj + lcls
 
     return loss, torch.cat((lxy, lwh, lobj, lcls, loss)).detach()
@@ -183,6 +191,9 @@ def build_targets(pred, model, targets):
     strides = m.strides
     num_layers = m.num_layers
     num_classes = m.num_classes
+
+    # print('12312313')
+    # print(targets.shape)
 
     num_targets = len(targets)
     txy, twh, tcls, indices = [], [], [], []
@@ -221,7 +232,9 @@ def build_targets(pred, model, targets):
         # twh.append((gwh / layer.anchor_vec[a]) ** (1 / 3) / 2)  # wh power method
         # Class
         tcls.append(c)
-
+        # print(c.shape)
+        # print(c.shape[0])
+        # print(c)
         if c.shape[0]:
             assert c.max() <= num_classes, 'Target classes exceed model classes'
 

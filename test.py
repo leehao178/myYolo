@@ -21,7 +21,7 @@ parser.add_argument('--data', default='/home/lab602.demo/.pipeline/datasets/VOCd
                     type=str,
                     metavar='DIR',
                     help='path to dataset')
-parser.add_argument('--img_size', default=416,
+parser.add_argument('--img_size', default=544,
                     type=int,
                     help='path to dataset')
 parser.add_argument('--resume', default='', type=str, metavar='PATH', help='path to latest checkpoint (default: none)')
@@ -38,7 +38,7 @@ parser.add_argument('--momentum', default=0.9, type=float, metavar='M',
 parser.add_argument('--wd', '--weight-decay', default=5e-4, type=float,
                     metavar='W', help='weight decay (default: 1e-4)',
                     dest='weight_decay')
-parser.add_argument('-b', '--batch-size', default=8, type=int,
+parser.add_argument('-b', '--batch-size', default=64, type=int,
                     metavar='N',
                     help='mini-batch size (default: 128), this is the total '
                          'batch size of all GPUs on the current node when '
@@ -69,8 +69,7 @@ def main():
     ANCHORS_PER_SCLAE = 3
 
     model = YOLOv3(anchors=torch.FloatTensor(ANCHORS).to(device),
-                strides=torch.FloatTensor(STRIDES).to(device),
-                init_weights=False)
+                    strides=torch.FloatTensor(STRIDES).to(device))
     
     model.cuda(args.gpu)
     model.load_state_dict(torch.load(args.cpkt, map_location=device)['model'])
@@ -85,7 +84,11 @@ def main():
     mAP = 0
     print('*'*20+"Validate"+'*'*20)
     with torch.no_grad():
-        APs = Evaluator(model, dataloader=val_loader).APs_voc()
+        APs = Evaluator(model,
+                        dataloader=val_loader,
+                        test_size=args.img_size,
+                        conf_thres=0.01,
+                        nms_thresh=0.5).APs_voc()
         for i in APs:
             print("{} --> mAP : {}".format(i, APs[i]))
             mAP += APs[i]

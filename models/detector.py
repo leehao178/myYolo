@@ -12,7 +12,7 @@ class YOLOv3(nn.Module):
     """
     Note ： int the __init__(), to define the modules should be in order, because of the weight file is order
     """
-    def __init__(self, anchors, strides, num_classes=20, num_anchors=3, num_layers=3, init_weights=True):
+    def __init__(self, anchors, strides, num_classes=20, num_anchors=3, num_layers=3, pretrained=None):
         super(YOLOv3, self).__init__()
         self.anchors = anchors
         self.strides = strides
@@ -31,10 +31,11 @@ class YOLOv3(nn.Module):
         # large
         self.head_l = YOLOHead(num_classes=num_classes, anchors=anchors[2, :, :])
 
-        if init_weights:
-            self.__init_weights()
+        if pretrained is not None:
+            self.load_darknet_weights(weight_file=pretrained)
         else:
-            self.load_darknet_weights()
+            self.init_weights()
+            
 
     def forward(self, x):
         out = []
@@ -80,7 +81,7 @@ class YOLOv3(nn.Module):
             return torch.cat(io, 1), p
 
 
-    def __init_weights(self):
+    def init_weights(self):
         " Note ：nn.Conv2d nn.BatchNorm2d'initing modes are uniform "
         for m in self.modules():
             if isinstance(m, nn.Conv2d):

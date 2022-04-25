@@ -134,12 +134,23 @@ def voc_eval(detpath,
         class_recs[imagename] = {'bbox': bbox,
                                  'difficult': difficult,
                                  'det': det}
+    # for imagename in imagenames2:
+    #     R = [obj for obj in recs[imagename] if obj['name'] == classname]
+    #     bbox = np.array([x['bbox'] for x in R])
+    #     difficult = np.array([x['difficult'] for x in R]).astype(np.bool)
+    #     det = [False] * len(R)
+    #     npos = npos + sum(~difficult)
+    #     class_recs[imagename] = {'bbox': bbox,
+    #                              'difficult': difficult,
+    #                              'det': det}
 
     # read dets
     detfile = detpath.format(classname)
+    # try:
     with open(detfile, 'r') as f:
         lines = f.readlines()
-
+    # except:
+    #     lines = []
     splitlines = [x.strip().split(' ') for x in lines]
     image_ids = [x[0] for x in splitlines]
     confidence = np.array([float(x[1]) for x in splitlines])

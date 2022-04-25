@@ -20,7 +20,7 @@ parser.add_argument('--data', default='/home/lab602.demo/.pipeline/datasets/VOCd
                     type=str,
                     metavar='DIR',
                     help='path to dataset')
-parser.add_argument('--img_size', default=416,
+parser.add_argument('--img_size', default=544,
                     type=int,
                     help='path to dataset')
 parser.add_argument('--resume', default='', type=str, metavar='PATH', help='path to latest checkpoint (default: none)')
@@ -30,7 +30,7 @@ parser.add_argument('--start-epoch', default=0, type=int, metavar='N',
                     help='manual epoch number (useful on restarts)')
 parser.add_argument('--workers', default=3, type=int, metavar='N',
                     help='number of data loading workers (default: 4)')
-parser.add_argument('--lr', '--learning-rate', default=0.003, type=float,
+parser.add_argument('--lr', '--learning-rate', default=0.001, type=float,
                     metavar='LR', help='initial learning rate', dest='lr')
 parser.add_argument('--momentum', default=0.9, type=float, metavar='M',
                     help='momentum')
@@ -47,6 +47,8 @@ parser.add_argument('-p', '--print-freq', default=10, type=int,
 parser.add_argument('--gpu', default=2, type=int,
                     help='GPU id to use.')
 parser.add_argument("--local_rank", type=int, default=0,
+                    help='node rank for distributed training')
+parser.add_argument("--pretrained", type=str, default='outputs/yolov3.weights',
                     help='node rank for distributed training')
 
 
@@ -78,7 +80,8 @@ def main():
 
     model = YOLOv3(anchors=torch.FloatTensor(ANCHORS).to(device),
                    strides=torch.FloatTensor(STRIDES).to(device),
-                   init_weights=False)
+                   num_classes=20,
+                   pretrained=args.pretrained)
 
     if milti_gpus:
         # 4) 封裝之前要把模型移到對應的gpu
@@ -96,14 +99,14 @@ def main():
     # define loss function (criterion) and optimizer
     # criterion = YoloV3Loss(anchors=ANCHORS, strides=STRIDES,
     #                                 iou_threshold_loss=IOU_THRESHOLD_LOSS)
-    # if milti_gpus:
-    #     args.lr = args.lr * torch.cuda.device_count()
+    if milti_gpus:
+        args.lr = args.lr * (3 ** 0.5)
     optimizer = torch.optim.SGD(model.parameters(), lr=args.lr,
                                 momentum=args.momentum,
                                 weight_decay=args.weight_decay)
     
     # scheduler_LR = StepLR(optimizer, step_size=40, gamma=0.1)
-    scheduler_LR = MultiStepLR(optimizer, milestones=[40, 45], gamma=0.1)
+    scheduler_LR = MultiStepLR(optimizer, milestones=[47, 49], gamma=0.1)
     
     outputs = './outputs/{}'.format(args.name)
     
@@ -138,14 +141,33 @@ def main():
 
     max_iter = len(train_loader)
 
+    n_burnin = min(round(max_iter / 5 + 1), 1000)  # burn-in batches
+
     for epoch in range(args.start_epoch, args.epochs):
         if milti_gpus:
             # 使多顯卡訓練的訓練資料洗牌
             train_sampler.set_epoch(epoch)
         # adjust_learning_rate(optimizer, epoch, args)
+        freeze_backbone = True
+        cutoff = 75
+        # Freeze backbone at epoch 0, unfreeze at epoch 1 (optional)
+        if freeze_backbone and epoch < 2:
+            for name, p in model.named_parameters():
+                # if int(name.split('.')[1]) < cutoff:  # if layer < 75
+                #     p.requires_grad = False if epoch == 0 else True
+                if name.split('.')[0] == 'backnone':
+                    p.requires_grad = False if epoch == 0 else True
         
         # train for one epoch
-        losses, xy_loss, wh_loss, obj_loss, cls_loss = train(train_loader, model, optimizer, epoch, args, local_rank, max_iter, args.epochs)
+        losses, xy_loss, wh_loss, obj_loss, cls_loss = train(train_loader,
+                                                             model,
+                                                             optimizer,
+                                                             epoch,
+                                                             args,
+                                                             local_rank,
+                                                             max_iter,
+                                                             args.epochs,
+                                                             n_burnin)
         if local_rank == 0:
             tblogger.add_scalar("train/loss", losses, epoch + 1)
             tblogger.add_scalar("train/xy_loss", xy_loss, epoch + 1)
@@ -153,16 +175,26 @@ def main():
             tblogger.add_scalar("train/obj_loss", obj_loss, epoch + 1)
             tblogger.add_scalar("train/cls_loss", cls_loss, epoch + 1)
             tblogger.add_scalar("train/learning_rate", optimizer.param_groups[0]['lr'], epoch + 1)
-        
+        is_best = False
         if local_rank == 0:
-            # print('123123123')
-            # print(epoch)
-            # print((epoch + 1) % 2)
-            if (epoch + 1) % 20 == 0:
+            if (epoch + 1) % 10 == 0:
+                save_checkpoint({
+                    'epoch': epoch + 1,
+                    'model': model.module.state_dict() if type(
+                                model) is nn.parallel.DistributedDataParallel else model.state_dict(),
+                    'optimizer': optimizer.state_dict(),
+                }, is_best, outputs=outputs, epoch=epoch + 1)
+        if local_rank == 0:
+            if (epoch + 1) % 50 == 0:
                 mAP = 0
                 print('*'*20+"Validate"+'*'*20)
                 with torch.no_grad():
-                    APs = Evaluator(model, dataloader=val_loader).APs_voc()
+                    APs = Evaluator(model,
+                                    dataloader=val_loader,
+                                    test_size=args.img_size,
+                                    epoch=epoch+1, 
+                                    conf_thres=0.01,
+                                    nms_thresh=0.5).APs_voc()
                     for i in APs:
                         print("{} --> mAP : {}".format(i, APs[i]))
                         mAP += APs[i]
@@ -179,15 +211,7 @@ def main():
         # remember best acc@1 and save checkpoint
         # is_best = acc1 > best_acc1
         # best_acc1 = max(acc1, best_acc1)
-        is_best = False
-        if local_rank == 0:
-            if (epoch + 1) % 10 == 0:
-                save_checkpoint({
-                    'epoch': epoch + 1,
-                    'model': model.module.state_dict() if type(
-                                model) is nn.parallel.DistributedDataParallel else model.state_dict(),
-                    'optimizer': optimizer.state_dict(),
-                }, is_best, outputs=outputs, epoch=epoch + 1)
+
         scheduler_LR.step()
 
 def save_checkpoint(state, is_best, outputs='', epoch=''):
@@ -196,7 +220,7 @@ def save_checkpoint(state, is_best, outputs='', epoch=''):
     if is_best:
         shutil.copyfile(filename, os.path.join(outputs, 'model_best.pth'))
 
-def train(train_loader, model, optimizer, epoch, args, rank, max_iter, max_epoch):
+def train(train_loader, model, optimizer, epoch, args, rank, max_iter, max_epoch, n_burnin):
     batch_time = AverageMeter()
     data_time = AverageMeter()
     losses = AverageMeter()
@@ -227,6 +251,12 @@ def train(train_loader, model, optimizer, epoch, args, rank, max_iter, max_epoch
         if args.gpu is not None:
             imgs = imgs.cuda()
         target = target.cuda()
+
+        # SGD burn-in
+        if epoch == 0 and i <= n_burnin:
+            lr = args.lr * (i / n_burnin) ** 4
+            for x in optimizer.param_groups:
+                x['lr'] = lr
 
         # compute output
         output = model(imgs)

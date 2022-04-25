@@ -1,4 +1,3 @@
-
 from torch.utils.data import Dataset
 import torch.nn.functional as F
 import torch
@@ -19,8 +18,7 @@ class ListDataset(Dataset):
                  img_size=416,
                  multiscale=True,
                  transform=None,
-                 years=['VOC2007', 'VOC2012'],
-                 traintype='train',
+                 years={'VOC2007':'trainval', 'VOC2012': 'trainval'},
                  use_difficult_bbox=False):
         self.img_size = img_size
         self.max_objects = 100
@@ -37,10 +35,10 @@ class ListDataset(Dataset):
         self.img_files = []
         self.imgs_ids = []
         self.label_files = []
-
-        for year in years:
-            with open(os.path.join(list_path, year, 'ImageSets', 'Main', '{}.txt'.format(traintype)), "r") as f:
-                img_ids = f.readlines()
+        
+        for year, train_type in years.items():
+            with open(os.path.join(list_path, year, 'ImageSets', 'Main', '{}.txt'.format(train_type)), "r") as f:
+                    img_ids = f.readlines()
             for img_id in img_ids:
                 self.img_files.append(os.path.join(list_path, year, 'JPEGImages', f'{img_id.strip()}.jpg'))
                 self.imgs_ids.append(img_id.strip())
@@ -69,17 +67,21 @@ class ListDataset(Dataset):
                     ymin = float(bnd_box.find('ymin').text)
                     xmax = float(bnd_box.find('xmax').text)
                     ymax = float(bnd_box.find('ymax').text)
-                    w = xmax - xmin
-                    h = ymax - ymin
-                    x = xmin + w*0.5
-                    y = ymin + h*0.5
+
+                    # bbox = [
+                    #     label,
+                    #     x/width,
+                    #     y/height,
+                    #     w/width,
+                    #     h/height,
+                    # ]
 
                     bbox = [
                         label,
-                        x/width,
-                        y/height,
-                        w/width,
-                        h/height,
+                        xmin,
+                        ymin,
+                        xmax,
+                        ymax,
                     ]
                     bboxes.append(bbox)
                 bboxes = np.array(bboxes)
@@ -91,7 +93,7 @@ class ListDataset(Dataset):
             img_path = self.img_files[index]
             img_id = self.imgs_ids[index]
             # img = np.array(Image.open(img_path).convert('RGB'), dtype=np.uint8)
-            img = cv2.imread(img_path)  # BGR
+            img = cv2.imread(img_path)  # H*W*C and C=BGR
         except Exception:
             print(f"Could not read image '{img_path}'.")
             return
@@ -103,42 +105,11 @@ class ListDataset(Dataset):
         except Exception:
             # print(f"Could not read label '{label_path}'.")
             return
-        
-        # SV augmentation by 50%
-        fraction = 0.50  # must be < 1.0
-        img_hsv = cv2.cvtColor(img, cv2.COLOR_BGR2HSV)  # hue, sat, val
-        S = img_hsv[:, :, 1].astype(np.float32)  # saturation
-        V = img_hsv[:, :, 2].astype(np.float32)  # value
-
-        a = (random.random() * 2 - 1) * fraction + 1
-        b = (random.random() * 2 - 1) * fraction + 1
-        S *= a
-        V *= b
-
-        img_hsv[:, :, 1] = S if a < 1 else S.clip(None, 255)
-        img_hsv[:, :, 2] = V if b < 1 else V.clip(None, 255)
-        cv2.cvtColor(img_hsv, cv2.COLOR_HSV2BGR, dst=img)
-        
-        h, w, _ = img.shape
-        shape = self.img_size
-        img, ratiow, ratioh, padw, padh = letterbox(img, new_shape=shape, mode='square')
-        labels = boxes.copy()
-        labels[:, 1] = ratiow * w * (boxes[:, 1] - boxes[:, 3] / 2) + padw
-        labels[:, 2] = ratioh * h * (boxes[:, 2] - boxes[:, 4] / 2) + padh
-        labels[:, 3] = ratiow * w * (boxes[:, 1] + boxes[:, 3] / 2) + padw
-        labels[:, 4] = ratioh * h * (boxes[:, 2] + boxes[:, 4] / 2) + padh
-        
-        labels[:, 1:5] = xyxy2xywh(labels[:, 1:5])
-
-        # Normalize coordinates 0 - 1
-        labels[:, [2, 4]] /= img.shape[0]  # height
-        labels[:, [1, 3]] /= img.shape[1]  # width
-        # print(img)
 
         # -------Transforms-------
         if self.transform:
             try:
-                img, bb_targets = self.transform((img, labels))
+                img, bb_targets = self.transform((img, boxes))
             except Exception:
                 print(Exception)
                 print("Could not apply transform.")

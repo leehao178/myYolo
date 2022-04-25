@@ -27,7 +27,7 @@ parser.add_argument('--data', default='/home/lab602.demo/.pipeline/datasets/VOCd
                     type=str,
                     metavar='DIR',
                     help='path to dataset')
-parser.add_argument('--img_size', default=416,
+parser.add_argument('--img_size', default=608,
                     type=int,
                     help='path to dataset')
 parser.add_argument('--resume', default='', type=str, metavar='PATH', help='path to latest checkpoint (default: none)')
@@ -56,7 +56,7 @@ parser.add_argument('--gpu', default=0, type=int,
 parser.add_argument("--local_rank", type=int, default=0,
                     help='node rank for distributed training')
 
-parser.add_argument("-c", "--cpkt", type=str, default='/home/lab602.demo/.pipeline/10678031/myYolo/outputs/voc/epoch_50.pth',
+parser.add_argument("-c", "--cpkt", type=str, default='/home/lab602.demo/.pipeline/10678031/myYolo/outputs/voc/epoch_40.pth',
                     help='pth')
 
 
@@ -88,7 +88,7 @@ def main():
     path = '/home/lab602.demo/.pipeline/10678031/myYolo/dog.jpg'
     img = cv2.imread(path)
     img = transforms.ToTensor()(img)
-    img = resize(img, 416).unsqueeze(0).to(device)
+    img = resize(img, 608).unsqueeze(0).to(device)
     # print(img.shape)
     # img = torch.from_numpy(img).unsqueeze(0).to(device)
     
@@ -100,7 +100,7 @@ def main():
 
     img = cv2.imread(path)
     w, h, _ = img.shape
-    img = cv2.resize(img, (416, 416))
+    img = cv2.resize(img, (608, 608))
     
     for i in det:
         xmin, ymin, xmax, ymax, conf, score2, cls = i

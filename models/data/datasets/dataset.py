@@ -6,10 +6,19 @@ from torchvision import transforms
 import torchvision.datasets as datasets
 from torch.utils.data.distributed import DistributedSampler
 from models.data.datasets.voc import ListDataset
-from models.data.datasets.augmentations import AUGMENTATION_TRANSFORMS
+from models.data.datasets.transforms import ToTensor, RandomHorizontalFilp, RandomCrop
+from models.data.datasets.transforms import Normalize, ImageHSV, Pad, RelativeLabels, RandomAffine
+
 
 class Dataset:
-    def __init__(self, img_size, batch_size, workers, isDistributed=False, data_dir=None, MNIST=True, dataset_type='voc'):
+    def __init__(self,
+                 img_size,
+                 batch_size,
+                 workers,
+                 isDistributed=False,
+                 data_dir=None,
+                 MNIST=True,
+                 dataset_type='voc'):
         self.img_size = img_size
         self.data_dir = data_dir
         self.batch_size = batch_size
@@ -60,22 +69,47 @@ class Dataset:
                                     ]))
 
         elif self.dataset_type == 'voc':
-            # normalize = transforms.Normalize(mean=[0.485, 0.456, 0.406],
-            #                          std=[0.229, 0.224, 0.225])
+            AUGMENTATION_TRANSFORMS = transforms.Compose([
+                                        # xyxy
+                                        ImageHSV(),
+                                        # xyxy
+                                        RandomHorizontalFilp(),
+                                        # RandomCrop(),
+                                        # RandomAffine(),
+                                        Pad(img_size=self.img_size),
+                                        # xywh
+                                        RelativeLabels(),
+                                        # normalize xywh
+                                        # Normalize(mean=[123.675, 116.28, 103.53],
+                                        #           std=[58.395, 57.12, 57.375],
+                                        #           to_rgb=True),
+                                        # normalize xywh
+                                        ToTensor(),
+                                    ])
+
+            AUGMENTATION_TRANSFORMS_TEST = transforms.Compose([
+                                        # ImageHSV(),
+                                        Pad(img_size=self.img_size),
+                                        # RelativeLabels(),
+                                        # RandomHorizontalFilp(),
+                                        # Normalize(mean=[123.675, 116.28, 103.53],
+                                        #           std=[58.395, 57.12, 57.375],
+                                        #           to_rgb=True),
+                                        ToTensor(),
+                                    ])
             train_dataset = ListDataset(
                                 self.data_dir,
                                 img_size=self.img_size,
-                                multiscale=True,
+                                multiscale=False,
                                 transform=AUGMENTATION_TRANSFORMS,
-                                traintype='train')
+                                years={'VOC2007':'trainval', 'VOC2012': 'trainval'})
 
             val_dataset = ListDataset(
                                 self.data_dir,
                                 img_size=self.img_size,
                                 multiscale=False,
-                                years=['VOC2007'],
-                                transform=AUGMENTATION_TRANSFORMS,
-                                traintype='val')
+                                years={'VOC2007': 'test'},
+                                transform=AUGMENTATION_TRANSFORMS_TEST)
 
         train_sampler = None
         if self.dataset_type == 'voc':
