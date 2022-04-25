@@ -57,9 +57,7 @@ def voc_ap(rec, prec, use_07_metric=False):
 
 def voc_eval(detpath,
              annopath,
-             imagesetfile,
-             annopath2,
-             imagesetfile2,             
+             imagesetfile,           
              classname,
              cachedir,
              ovthresh=0.5,
@@ -96,10 +94,6 @@ def voc_eval(detpath,
         lines = f.readlines()
     imagenames = [x.strip() for x in lines]
 
-    # with open(imagesetfile2, 'r') as f:
-    #     lines = f.readlines()
-    # imagenames2 = [x.strip() for x in lines]
-
     if not os.path.isfile(cachefile):
         # load annots
         recs = {}
@@ -108,11 +102,6 @@ def voc_eval(detpath,
             if i % 100 == 0:
                 print ('Reading annotation for {:d}/{:d}'.format(
                     i + 1, len(imagenames)))
-        # for i, imagename in enumerate(imagenames2):
-        #     recs[imagename] = parse_rec(annopath2.format(imagename))
-        #     if i % 100 == 0:
-        #         print ('Reading annotation for {:d}/{:d}'.format(
-        #             i + 1, len(imagenames2)))
         # save
         print ('Saving cached annotations to {:s}'.format(cachefile))
         with open(cachefile, 'wb') as f:
@@ -134,15 +123,6 @@ def voc_eval(detpath,
         class_recs[imagename] = {'bbox': bbox,
                                  'difficult': difficult,
                                  'det': det}
-    # for imagename in imagenames2:
-    #     R = [obj for obj in recs[imagename] if obj['name'] == classname]
-    #     bbox = np.array([x['bbox'] for x in R])
-    #     difficult = np.array([x['difficult'] for x in R]).astype(np.bool)
-    #     det = [False] * len(R)
-    #     npos = npos + sum(~difficult)
-    #     class_recs[imagename] = {'bbox': bbox,
-    #                              'difficult': difficult,
-    #                              'det': det}
 
     # read dets
     detfile = detpath.format(classname)
