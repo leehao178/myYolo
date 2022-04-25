@@ -1,4 +1,4 @@
-# myYolo
+# Yolo Detection
 
 # install
 ```
