@@ -4,6 +4,7 @@ from models.data.datasets.dataset import Dataset
 from loguru import logger
 from models.detector import YOLOv3
 from models.eval.evaluator import Evaluator
+import yaml
 
 
 parser = argparse.ArgumentParser(description='Netowks Object Detection Test')
@@ -12,23 +13,16 @@ parser.add_argument('--data', default='/home/lab602.demo/.pipeline/datasets/VOCd
                     type=str,
                     metavar='DIR',
                     help='path to dataset')
-parser.add_argument('--img_size', default=544,
-                    type=int,
-                    help='path to dataset')
-parser.add_argument('--resume', default='', type=str, metavar='PATH', help='path to latest checkpoint (default: none)')
-parser.add_argument('--epochs', default=50, type=int, metavar='N',
-                    help='number of total epochs to run')
-parser.add_argument('--start-epoch', default=0, type=int, metavar='N',
-                    help='manual epoch number (useful on restarts)')
+parser.add_argument('--config_file', default='configs/yolov3.yaml',
+                    type=str,
+                    help='path to config file')
+parser.add_argument('--resume',
+                    default='',
+                    type=str,
+                    metavar='PATH',
+                    help='path to latest checkpoint (default: none)')
 parser.add_argument('--workers', default=3, type=int, metavar='N',
                     help='number of data loading workers (default: 4)')
-parser.add_argument('--lr', '--learning-rate', default=0.003, type=float,
-                    metavar='LR', help='initial learning rate', dest='lr')
-parser.add_argument('--momentum', default=0.9, type=float, metavar='M',
-                    help='momentum')
-parser.add_argument('--wd', '--weight-decay', default=5e-4, type=float,
-                    metavar='W', help='weight decay (default: 1e-4)',
-                    dest='weight_decay')
 parser.add_argument('-b', '--batch-size', default=64, type=int,
                     metavar='N',
                     help='mini-batch size (default: 128), this is the total '
@@ -45,23 +39,19 @@ parser.add_argument("-c", "--cpkt", type=str, default='outputs/voc/epoch_50.pth'
 def main():
     args = parser.parse_args()
     torch.cuda.set_device(args.gpu)
-    device = torch.device('cuda:{}'.format(args.gpu) if True else 'cpu')
+    device = torch.device(f'cuda:{args.gpu}' if True else 'cpu')
     logger.add('outputs/voc/test_log.txt', encoding='utf-8', enqueue=True)
-    logger.info('Use GPU: {} for training'.format(args.gpu))
+    logger.info(f'Use GPU: {args.gpu} for training')
 
+    with open(args.config_file, errors='ignore') as f:
+        configs = yaml.safe_load(f)
 
-    ANCHORS = [[(10,13), (16,30), (33,23)],  # Anchors for small obj
-                    [(30,61, ), (62,45), (59,119)],  # Anchors for medium obj
-                    [(116,90), (156,198), (373,326)]]# Anchors for big obj
-    STRIDES = [8, 16, 32]
-    ANCHORS_PER_SCLAE = 3
-
-    model = YOLOv3(anchors=torch.FloatTensor(ANCHORS).to(device),
-                   strides=torch.FloatTensor(STRIDES).to(device))
+    model = YOLOv3(anchors=torch.FloatTensor(configs['anchors']).to(device),
+                   strides=torch.FloatTensor(configs['strides'][0]).to(device))
     
     model.cuda(args.gpu)
     model.load_state_dict(torch.load(args.cpkt, map_location=device)['model'])
-    custom_datasets = Dataset(img_size=args.img_size,
+    custom_datasets = Dataset(img_size=configs['test_size'],
                         batch_size=args.batch_size,
                         workers=args.workers,
                         isDistributed=False,
@@ -73,15 +63,12 @@ def main():
     with torch.no_grad():
         APs = Evaluator(model,
                         dataloader=val_loader,
-                        test_size=args.img_size,
-                        conf_thres=0.01,
-                        nms_thresh=0.5).APs_voc()
+                        configs=configs).APs_voc()
         for i in APs:
-            logger.info('{} --> mAP : {}'.format(i, APs[i]))
+            logger.info(f'{i} --> mAP : {APs[i]}')
             mAP += APs[i]
-        # num_classes = 20
-        mAP = mAP / 20
-        logger.info('mAP:%g'%(mAP))
+        mAP = mAP / configs['nc']
+        logger.info(f'mAP:{mAP}')
 
 
 if __name__ == '__main__':

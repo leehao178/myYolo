@@ -12,17 +12,14 @@ from models.utils.nms import non_max_suppression
 
 
 class Evaluator(object):
-    def __init__(self, model, dataloader, test_size, epoch='test', conf_thres=0.01, nms_thresh=0.5):
-        self.classes = ('aeroplane', 'bicycle', 'bird', 'boat', 'bottle', 'bus', 'car',
-                        'cat', 'chair', 'cow', 'diningtable', 'dog', 'horse',
-                        'motorbike', 'person', 'pottedplant', 'sheep', 'sofa', 'train',
-                        'tvmonitor')
+    def __init__(self, model, dataloader, configs, epoch='test'):
+        self.classes = configs['classes']
         self.outputs_path = '/home/lab602.demo/.pipeline/10678031/myYolo/outputs/voc'
         self.pred_result_path = os.path.join('/home/lab602.demo/.pipeline/10678031/myYolo/outputs/voc', 'results')
         self.val_data_path_07 = os.path.join('/home/lab602.demo/.pipeline/datasets/VOCdevkit', 'VOC2007')
-        self.conf_thresh = conf_thres
-        self.nms_thresh = nms_thresh
-        self.test_size =  test_size
+        self.conf_thresh = configs['conf_thres']
+        self.nms_thresh = configs['nms_thres']
+        self.test_size =  configs['test_size']
         self.dataloader = dataloader
         self.model = model
         self.device = next(model.parameters()).device

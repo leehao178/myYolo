@@ -6,6 +6,7 @@ from models.backbones.darknet import Darknet53, Conv2d
 from models.necks.fpn import YOLOFPN
 from models.heads.yolo_head import YOLOHead
 import numpy as np
+from loguru import logger
 
 
 class YOLOv3(nn.Module):
@@ -35,7 +36,6 @@ class YOLOv3(nn.Module):
             self.load_darknet_weights(weight_file=pretrained)
         else:
             self.init_weights()
-            
 
     def forward(self, x):
         out = []
@@ -68,7 +68,7 @@ class YOLOv3(nn.Module):
         if self.training:
             return out
         else:
-            io, p = list(zip(*out))  # inference output, training output
+            io, pred = list(zip(*out))  # inference output, training output
             '''
             io[0] = torch.Size([16, 8112, 25])
             io[1] = torch.Size([16, 2028, 25])
@@ -78,8 +78,7 @@ class YOLOv3(nn.Module):
             p[2] = torch.Size([16, 3, 13, 13, 25])
             torch.cat(io, 1) = torch.Size([16, 10647, 25])
             '''
-            return torch.cat(io, 1), p
-
+            return torch.cat(io, 1), pred
 
     def init_weights(self):
         " Note ：nn.Conv2d nn.BatchNorm2d'initing modes are uniform "
@@ -88,19 +87,15 @@ class YOLOv3(nn.Module):
                 nn.init.normal_(m.weight.data, 0.0, 0.01)
                 if m.bias is not None:
                     m.bias.data.zero_()
-                print("initing {}".format(m))
-
+                logger.info(f'initing {m}')
             elif isinstance(m, nn.BatchNorm2d):
                 nn.init.constant_(m.weight.data, 1.0)
                 nn.init.constant_(m.bias.data, 0.0)
+                logger.info(f'initing {m}')
 
-                print("initing {}".format(m))
-
-
-
-    def load_darknet_weights(self, weight_file='/home/lab602.demo/.pipeline/10678031/myYolo/outputs/yolov3.weights', cutoff=52):
-        "https://github.com/ultralytics/yolov3/blob/master/models.py"
-        print("load darknet weights : ", weight_file)
+    # https://github.com/ultralytics/yolov3/blob/master/models.py
+    def load_darknet_weights(self, weight_file='outputs/yolov3.weights', cutoff=52):
+        logger.info(f'load darknet weights : {weight_file}')
 
         with open(weight_file, 'rb') as f:
             _ = np.fromfile(f, dtype=np.int32, count=5)
@@ -136,24 +131,19 @@ class YOLOv3(nn.Module):
                     bn_rv = torch.from_numpy(weights[ptr:ptr + num_b]).view_as(bn_layer.running_var)
                     bn_layer.running_var.data.copy_(bn_rv)
                     ptr += num_b
-
-                    print("loading bn_layer weight {}".format(bn_layer))
+                    logger.info(f'loading bn_layer weight {bn_layer}')
                 else:
                     # Load conv. bias
-                    # print(conv_layer.bias)
-                    # torch.zeros(m.weight.size()[2:]).numel()
                     num_b = conv_layer.bias.numel()
                     conv_b = torch.from_numpy(weights[ptr:ptr + num_b]).view_as(conv_layer.bias.data)
                     conv_layer.bias.data.copy_(conv_b)
                     ptr += num_b
-                    print("loading conv_layer weight {}".format(conv_layer))
+                    logger.info(f'loading conv_layer weight {conv_layer}')
                 # Load conv. weights
                 num_w = conv_layer.weight.numel()
                 conv_w = torch.from_numpy(weights[ptr:ptr + num_w]).view_as(conv_layer.weight.data)
                 conv_layer.weight.data.copy_(conv_w)
                 ptr += num_w
-
-                
 
 
 if __name__ == "__main__":

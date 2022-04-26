@@ -15,7 +15,6 @@ class YOLOHead(nn.Module):
         self.nx = 0  # initialize number of x gridpoints
         self.ny = 0  # initialize number of y gridpoints
 
-
     def forward(self, p, img_size):
         batch_size, ny, nx = p.shape[0], p.shape[-2], p.shape[-1]
         if (self.nx, self.ny) != (nx, ny):

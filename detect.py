@@ -19,6 +19,7 @@ from models.data.datasets.voc import resize
 import torchvision.transforms as transforms
 from models.utils.visualization import _COLORS
 import numpy as np
+import yaml
 
 
 parser = argparse.ArgumentParser(description='Netowks Object Detection Training')
@@ -27,6 +28,9 @@ parser.add_argument('--data', default='/home/lab602.demo/.pipeline/datasets/VOCd
                     type=str,
                     metavar='DIR',
                     help='path to dataset')
+parser.add_argument('--config_file', default='configs/yolov3.yaml',
+                    type=str,
+                    help='path to config file')
 parser.add_argument('--img_size', default=608,
                     type=int,
                     help='path to dataset')
@@ -56,7 +60,7 @@ parser.add_argument('--gpu', default=0, type=int,
 parser.add_argument("--local_rank", type=int, default=0,
                     help='node rank for distributed training')
 
-parser.add_argument("-c", "--cpkt", type=str, default='/home/lab602.demo/.pipeline/10678031/myYolo/outputs/voc/epoch_40.pth',
+parser.add_argument("-c", "--cpkt", type=str, default='voc/epoch_50.pth',
                     help='pth')
 
 
@@ -65,6 +69,8 @@ def main():
     nms_thres = 0.5
     args = parser.parse_args()
     torch.cuda.set_device(args.gpu)
+    with open(args.config_file, errors='ignore') as f:
+        configs = yaml.safe_load(f)
     device = torch.device('cuda:{}'.format(args.gpu) if True else 'cpu')
     print("Use GPU: {} for training".format(args.gpu))
 
