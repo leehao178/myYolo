@@ -32,7 +32,7 @@ parser.add_argument('--gpu', default=2, type=int,
                     help='GPU id to use.')
 parser.add_argument("--local_rank", type=int, default=0,
                     help='node rank for distributed training')
-parser.add_argument("-c", "--cpkt", type=str, default='outputs/voc/epoch_50.pth',
+parser.add_argument("-c", "--cpkt", type=str, default='outputs/voc/epoch_20.pth',
                     help='pth')
 
 

@@ -33,6 +33,7 @@ class YOLOv3(nn.Module):
         self.head_l = YOLOHead(num_classes=num_classes, anchors=anchors[2, :, :])
 
         if pretrained is not None:
+            self.init_weights()
             self.load_darknet_weights(weight_file=pretrained)
         else:
             self.init_weights()

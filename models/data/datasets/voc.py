@@ -19,7 +19,7 @@ class ListDataset(Dataset):
                  multiscale=True,
                  transform=None,
                  years={'VOC2007':'trainval', 'VOC2012': 'trainval'},
-                 use_difficult_bbox=False):
+                 use_difficult_bbox=True):
         self.img_size = img_size
         self.max_objects = 100
         self.multiscale = multiscale

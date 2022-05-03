@@ -74,8 +74,8 @@ class Dataset:
                                         ImageHSV(),
                                         # xyxy
                                         RandomHorizontalFilp(),
-                                        # RandomCrop(),
-                                        # RandomAffine(),
+                                        RandomCrop(),
+                                        RandomAffine(),
                                         Pad(img_size=self.img_size),
                                         # xywh
                                         RelativeLabels(),

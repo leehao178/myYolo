@@ -1,5 +1,5 @@
 # Parameters
-train_size: 544
+train_size: 448
 nc: 20  # number of classes
 classes: ['aeroplane', 'bicycle', 'bird', 'boat', 'bottle',
           'bus', 'car', 'cat', 'chair', 'cow',

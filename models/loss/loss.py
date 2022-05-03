@@ -122,6 +122,7 @@ def compute_loss(pred, targets, model):  # predictions, targets, model
     # BCEcls = nn.BCEWithLogitsLoss(pos_weight=ft([hyp['cls_pw']]))
     # BCEobj = nn.BCEWithLogitsLoss(pos_weight=ft([hyp['obj_pw']]))
 
+    BCExy = nn.BCEWithLogitsLoss()
     BCEcls = nn.BCEWithLogitsLoss()
     BCEobj = nn.BCEWithLogitsLoss()
 
@@ -144,7 +145,7 @@ def compute_loss(pred, targets, model):  # predictions, targets, model
             # pi[..., 2:4] = torch.sigmoid(pi[..., 2:4])  # wh power loss (uncomment)
 
             # torch.Size([num_target, 2])
-            lxy += MSE(torch.sigmoid(pi[..., 0:2]), txy[i])  # xy loss
+            lxy += BCExy(pi[..., 0:2], txy[i])  # xy loss
             lwh += MSE(pi[..., 2:4], twh[i])  # wh yolo loss
 
             # tclsm = torch.Size([num_target, 20])
@@ -162,10 +163,10 @@ def compute_loss(pred, targets, model):  # predictions, targets, model
     # lobj *= (k * hyp['cls'])
     # lcls *= (k * hyp['obj'])
 
-    lxy *= 0.1
-    lwh *= 0.2
+    lxy *= 2.0
+    lwh *= 2.0
     lobj *= 1.0
-    lcls *= 0.5
+    lcls *= 1.0
     loss = lxy + lwh + lobj + lcls
 
     return loss, torch.cat((lxy, lwh, lobj, lcls, loss)).detach()
@@ -176,7 +177,7 @@ def build_targets(pred, model, targets):
     # pred = [0_batch_size, 1_self.num_anchors, 2_nG, 3_nG, 4_5+self.num_classes]
     # targets = [image, class, x(歸一後的中心), y, w（歸一後的寬）, h] [ 0.00000, 20.00000,  0.72913,  0.48770,  0.13595,  0.08381]
     # iou_thres = model.hyp['iou_t']  # hyperparameter
-    iou_thres = 0.5
+    iou_thres = 0.2
     # if type(model) in (nn.parallel.DataParallel, nn.parallel.DistributedDataParallel):
     #     model = model.module
 

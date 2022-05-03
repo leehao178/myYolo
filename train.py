@@ -31,30 +31,31 @@ parser.add_argument('--resume',
                     type=str,
                     metavar='PATH',
                     help='path to latest checkpoint (default: none)')
-parser.add_argument('--epochs', default=50, type=int, metavar='N',
+parser.add_argument('--epochs', default=20, type=int, metavar='N',
                     help='number of total epochs to run')
 parser.add_argument('--start-epoch', default=0, type=int, metavar='N',
                     help='manual epoch number (useful on restarts)')
-parser.add_argument('--workers', default=3, type=int, metavar='N',
+parser.add_argument('--workers', default=2, type=int, metavar='N',
                     help='number of data loading workers (default: 4)')
-parser.add_argument('-b', '--batch-size', default=8, type=int,
+parser.add_argument('-b', '--batch-size', default=16, type=int,
                     metavar='N',
                     help='mini-batch size (default: 128), this is the total '
                          'batch size of all GPUs on the current node when '
                          'using Data Parallel or Distributed Data Parallel')
 parser.add_argument('-p', '--print-freq', default=10, type=int,
                     metavar='N', help='print frequency (default: 10)')
-parser.add_argument('--gpu', default=2, type=int,
+parser.add_argument('--gpu', default=0, type=int,
                     help='GPU id to use.')
 parser.add_argument("--local_rank", type=int, default=0,
                     help='node rank for distributed training')
-parser.add_argument("--pretrained", type=str, default='outputs/yolov3.weights',
+parser.add_argument("--pretrained", type=str, default='outputs/darknet53.conv.74',
                     help='node rank for distributed training')
 
 
 def main():
     args = parser.parse_args()
-    logger.add('outputs/voc/train_log.txt', encoding='utf-8', enqueue=True)
+    outputs = './outputs/{}'.format(args.name)
+    logger.add(f'{outputs}/train_log.txt', encoding='utf-8', enqueue=True)
 
     os.environ['CUDA_VISIBLE_DEVICES'] = '0,1,2'
 
@@ -106,11 +107,11 @@ def main():
                                 lr=configs['LR'],
                                 momentum=configs['momentum'],
                                 weight_decay=float(configs['weight_decay']))
-    
+    start_epoch = 0
     # scheduler_LR = StepLR(optimizer, step_size=40, gamma=0.1)
-    scheduler_LR = MultiStepLR(optimizer, milestones=[47, 49], gamma=0.1)
+    scheduler_LR = MultiStepLR(optimizer, milestones=[25, 40], gamma=0.1, last_epoch=start_epoch - 1)
     
-    outputs = './outputs/{}'.format(args.name)
+    
     
     if local_rank == 0:
         tblogger = SummaryWriter(os.path.join(outputs, "tensorboard"))
@@ -149,7 +150,7 @@ def main():
         if milti_gpus:
             # 使多顯卡訓練的訓練資料洗牌
             train_sampler.set_epoch(epoch)
-        freeze_backbone = True
+        freeze_backbone = False
         cutoff = 75
         # Freeze backbone at epoch 0, unfreeze at epoch 1 (optional)
         if freeze_backbone and epoch < 2:
@@ -158,6 +159,7 @@ def main():
                 #     p.requires_grad = False if epoch == 0 else True
                 if name.split('.')[0] == 'backnone':
                     p.requires_grad = False if epoch == 0 else True
+        model.train()
         
         # train for one epoch
         losses, xy_loss, wh_loss, obj_loss, cls_loss = train(train_loader,
@@ -221,7 +223,7 @@ def train(train_loader, model, optimizer, epoch, args, rank, max_iter, max_epoch
     cls_loss = AverageMeter()
 
     # switch to train mode
-    model.train()
+    
 
     end = time.time()
 
