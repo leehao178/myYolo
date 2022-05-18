@@ -6,7 +6,7 @@ from torchvision import transforms
 import torchvision.datasets as datasets
 from torch.utils.data.distributed import DistributedSampler
 from models.data.datasets.voc import ListDataset
-from models.data.datasets.transforms import ToTensor, RandomHorizontalFilp, RandomCrop
+from models.data.datasets.transforms import ToTensor, RandomHorizontalFilp, RandomCrop, Resize
 from models.data.datasets.transforms import Normalize, ImageHSV, Pad, RelativeLabels, RandomAffine
 
 
@@ -18,7 +18,8 @@ class Dataset:
                  isDistributed=False,
                  data_dir=None,
                  MNIST=True,
-                 dataset_type='voc'):
+                 dataset_type='voc',
+                 configs=None):
         self.img_size = img_size
         self.data_dir = data_dir
         self.batch_size = batch_size
@@ -26,6 +27,7 @@ class Dataset:
         self.isDistributed = isDistributed
         self.MNIST = MNIST
         self.dataset_type = dataset_type
+        self.configs = configs
 
 
     def dataloader(self):
@@ -69,22 +71,40 @@ class Dataset:
                                     ]))
 
         elif self.dataset_type == 'voc':
+            # AUGMENTATION_TRANSFORMS = transforms.Compose([
+            #                             # xyxy
+            #                             ImageHSV(),
+            #                             # xyxy
+            #                             RandomHorizontalFilp(),
+            #                             RandomCrop(),
+            #                             RandomAffine(),
+            #                             Pad(img_size=self.img_size),
+            #                             # xywh
+            #                             RelativeLabels(),
+            #                             # normalize xywh
+            #                             # Normalize(mean=[123.675, 116.28, 103.53],
+            #                             #           std=[58.395, 57.12, 57.375],
+            #                             #           to_rgb=True),
+            #                             # normalize xywh
+            #                             ToTensor(),
+            #                         ])
             AUGMENTATION_TRANSFORMS = transforms.Compose([
                                         # xyxy
-                                        ImageHSV(),
+                                        # ImageHSV(),
                                         # xyxy
                                         RandomHorizontalFilp(),
-                                        # RandomCrop(),
-                                        # RandomAffine(),
-                                        Pad(img_size=self.img_size),
+                                        RandomCrop(),
+                                        RandomAffine(),
+                                        # Pad(img_size=self.img_size),
                                         # xywh
-                                        RelativeLabels(),
+                                        # RelativeLabels(),
                                         # normalize xywh
                                         # Normalize(mean=[123.675, 116.28, 103.53],
                                         #           std=[58.395, 57.12, 57.375],
                                         #           to_rgb=True),
                                         # normalize xywh
-                                        ToTensor(),
+                                        # ToTensor(),
+                                        Resize((self.img_size, self.img_size), True)
                                     ])
 
             AUGMENTATION_TRANSFORMS_TEST = transforms.Compose([
@@ -102,14 +122,16 @@ class Dataset:
                                 img_size=self.img_size,
                                 multiscale=False,
                                 transform=AUGMENTATION_TRANSFORMS,
-                                years={'VOC2007':'trainval', 'VOC2012': 'trainval'})
+                                years={'VOC2007':'trainval', 'VOC2012': 'trainval'},
+                                configs=self.configs)
 
             val_dataset = ListDataset(
                                 self.data_dir,
                                 img_size=self.img_size,
                                 multiscale=False,
                                 years={'VOC2007': 'test'},
-                                transform=AUGMENTATION_TRANSFORMS_TEST)
+                                transform=AUGMENTATION_TRANSFORMS_TEST,
+                                configs=self.configs)
 
         train_sampler = None
         if self.dataset_type == 'voc':
@@ -119,21 +141,21 @@ class Dataset:
                 train_loader = torch.utils.data.DataLoader(dataset=train_dataset,
                                 batch_size=self.batch_size,
                                 sampler=train_sampler,
-                    num_workers=self.workers, pin_memory=pin_memory, collate_fn=train_dataset.collate_fn)
+                    num_workers=self.workers, pin_memory=pin_memory)
 
                 val_loader = torch.utils.data.DataLoader(
                     val_dataset,
                     batch_size=self.batch_size, sampler=DistributedSampler(val_dataset),
-                    num_workers=self.workers, pin_memory=pin_memory, collate_fn=val_dataset.collate_fn)
+                    num_workers=self.workers, pin_memory=pin_memory)
             else:
                 train_loader = torch.utils.data.DataLoader(
                     train_dataset, batch_size=self.batch_size, shuffle= True,
-                    num_workers=self.workers, pin_memory=pin_memory, collate_fn=train_dataset.collate_fn)
+                    num_workers=self.workers, pin_memory=pin_memory)
 
                 val_loader = torch.utils.data.DataLoader(
                     val_dataset,
                     batch_size=self.batch_size, shuffle=False,
-                    num_workers=self.workers, pin_memory=pin_memory, collate_fn=val_dataset.collate_fn)
+                    num_workers=self.workers, pin_memory=pin_memory)
         else:
             if self.isDistributed:
                 train_sampler =DistributedSampler(train_dataset)

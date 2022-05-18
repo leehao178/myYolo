@@ -58,3 +58,61 @@ def bbox_iou(box1, box2, x1y1x2y2=True, GIoU=False):
         return iou - (c_area - union_area) / c_area  # GIoU
 
     return iou
+
+def bbox_iou_np(boxes1, boxes2):
+    """
+    :param boxes1: boxes1和boxes2的shape可以不相同，但是需要滿足廣播機制
+    :param boxes2: 且需要保證最後一維為坐標維，以及坐標的存儲結構為(x,y,w,h)，其中(x,y)是bbox的中心坐標
+    :return: 返回boxes1和boxes2的IOU，IOU的shape為boxes1和boxes2廣播後的shape[:-1]
+    """
+    boxes1 = np.array(boxes1)
+    boxes2 = np.array(boxes2)
+
+    boxes1_area = boxes1[..., 2] * boxes1[..., 3]
+    boxes2_area = boxes2[..., 2] * boxes2[..., 3]
+
+    # 分別計算出boxes1和boxes2的左上角坐標、右下角坐標
+    # 存儲結構為(xmin, ymin, xmax, ymax)，其中(xmin,ymin)是bbox的左上角坐標，(xmax,ymax)是bbox的右下角坐標
+    boxes1 = np.concatenate([boxes1[..., :2] - boxes1[..., 2:] * 0.5,
+                             boxes1[..., :2] + boxes1[..., 2:] * 0.5], axis=-1)
+    boxes2 = np.concatenate([boxes2[..., :2] - boxes2[..., 2:] * 0.5,
+                             boxes2[..., :2] + boxes2[..., 2:] * 0.5], axis=-1)
+
+    # 計算出boxes1與boxes1相交部分的左上角坐標、右下角坐標
+    left_up = np.maximum(boxes1[..., :2], boxes2[..., :2])
+    right_down = np.minimum(boxes1[..., 2:], boxes2[..., 2:])
+
+    # 因為兩個boxes沒有交集時，(right_down - left_up) < 0，所以maximum可以保證當兩個boxes沒有交集時，它們之間的iou為0
+    inter_section = np.maximum(right_down - left_up, 0.0)
+    inter_area = inter_section[..., 0] * inter_section[..., 1]
+    union_area = boxes1_area + boxes2_area - inter_area
+    IOU = 1.0 * inter_area / union_area
+    return IOU
+
+
+def iou_xywh_torch(boxes1, boxes2):
+    """
+    :param boxes1: boxes1和boxes2的shape可以不相同，但是需要滿足廣播機制，且需要是Tensor
+    :param boxes2: 且需要保證最後一維為坐標維，以及坐標的存儲結構為(x, y, w, h)
+    :return: 返回boxes1和boxes2的IOU，IOU的shape為boxes1和boxes2廣播後的shape[:-1]
+    """
+    boxes1_area = boxes1[..., 2] * boxes1[..., 3]
+    boxes2_area = boxes2[..., 2] * boxes2[..., 3]
+
+    # 分別計算出boxes1和boxes2的左上角坐標、右下角坐標
+    # 存儲結構為(xmin, ymin, xmax, ymax)，其中(xmin,ymin)是bbox的左上角坐標，(xmax,ymax)是bbox的右下角坐標
+    boxes1 = torch.cat([boxes1[..., :2] - boxes1[..., 2:] * 0.5,
+                        boxes1[..., :2] + boxes1[..., 2:] * 0.5], dim=-1)
+    boxes2 = torch.cat([boxes2[..., :2] - boxes2[..., 2:] * 0.5,
+                        boxes2[..., :2] + boxes2[..., 2:] * 0.5], dim=-1)
+
+    # 計算出boxes1與boxes1相交部分的左上角坐標、右下角坐標
+    left_up = torch.max(boxes1[..., :2], boxes2[..., :2])
+    right_down = torch.min(boxes1[..., 2:], boxes2[..., 2:])
+
+    # 因為兩個boxes沒有交集時，(right_down - left_up) < 0，所以maximum可以保證當兩個boxes沒有交集時，它們之間的iou為0
+    inter_section = torch.max(right_down - left_up, torch.zeros_like(right_down))
+    inter_area = inter_section[..., 0] * inter_section[..., 1]
+    union_area = boxes1_area + boxes2_area - inter_area
+    IOU = 1.0 * inter_area / union_area
+    return IOU

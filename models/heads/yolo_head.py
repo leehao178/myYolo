@@ -2,9 +2,9 @@ import torch.nn as nn
 import torch
 
 
-class YOLOHead(nn.Module):
+class YOLOHead_(nn.Module):
     def __init__(self, num_classes, anchors):
-        super(YOLOHead, self).__init__()
+        super(YOLOHead_, self).__init__()
 
         self.anchors = anchors
         self.num_anchors = len(anchors)
@@ -14,7 +14,6 @@ class YOLOHead(nn.Module):
         # self.stride = stride
         self.nx = 0  # initialize number of x gridpoints
         self.ny = 0  # initialize number of y gridpoints
-
 
     def forward(self, p, img_size):
         batch_size, ny, nx = p.shape[0], p.shape[-2], p.shape[-1]
@@ -59,3 +58,48 @@ class YOLOHead(nn.Module):
         self.ng = torch.Tensor(ng).to(device)
         self.nx = nx
         self.ny = ny
+
+class YOLOHead(nn.Module):
+    def __init__(self, num_classes, anchors, stride):
+        super(YOLOHead, self).__init__()
+        self.anchors = anchors
+        self.num_anchors = len(anchors)
+        self.num_classes = num_classes
+        self.stride = stride
+
+    def forward(self, pred):
+        batch_size, num_grid = pred.shape[0], pred.shape[-1]
+        pred = pred.view(batch_size, self.num_anchors, 5 + self.num_classes, num_grid, num_grid).permute(0, 3, 4, 1, 2)
+        p_de = self.decode(pred.clone())
+
+        return (pred, p_de)
+
+    def decode(self, p):
+        batch_size, output_size = p.shape[:2]
+
+        device = p.device
+        anchors = (1.0 * self.anchors).to(device) / self.stride
+
+
+        conv_raw_dxdy = p[:, :, :, :, 0:2]
+        conv_raw_dwdh = p[:, :, :, :, 2:4]
+        conv_raw_conf = p[:, :, :, :, 4:5]
+        conv_raw_prob = p[:, :, :, :, 5:]
+
+        # y = torch.arange(0, output_size).unsqueeze(1).repeat(1, output_size)
+        # x = torch.arange(0, output_size).unsqueeze(0).repeat(output_size, 1)
+        # grid_xy = torch.stack([x, y], dim=-1)
+
+        yv, xv = torch.meshgrid([torch.arange(output_size), torch.arange(output_size)])
+        grid_xy = torch.stack((xv, yv), 2)
+
+        grid_xy = grid_xy.unsqueeze(0).unsqueeze(3).repeat(batch_size, 1, 1, 3, 1).float().to(device)
+
+        pred_xy = (torch.sigmoid(conv_raw_dxdy) + grid_xy) * self.stride
+        pred_wh = (torch.exp(conv_raw_dwdh) * anchors) * self.stride
+        pred_xywh = torch.cat([pred_xy, pred_wh], dim=-1)
+        pred_conf = torch.sigmoid(conv_raw_conf)
+        pred_prob = torch.sigmoid(conv_raw_prob)
+        pred_bbox = torch.cat([pred_xywh, pred_conf, pred_prob], dim=-1)
+
+        return pred_bbox.view(-1, 5 + self.num_classes) if not self.training else pred_bbox

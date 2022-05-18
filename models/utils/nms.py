@@ -1,6 +1,6 @@
 import torch
 from models.utils.bbox import bbox_iou, xywh2xyxy
-
+import numpy as np
 def non_max_suppression(prediction, conf_thres=0.5, nms_thres=0.5):
     """
     Removes detections with lower object confidence score than 'conf_thres'
@@ -122,3 +122,62 @@ def non_max_suppression(prediction, conf_thres=0.5, nms_thres=0.5):
             output[image_i] = det_max[(-det_max[:, 4]).argsort()]  # sort
 
     return output
+
+
+def iou_numpy(boxes1, boxes2):
+    """
+    :param boxes1: boxes1和boxes2的shape可以不相同，但是需要滿足廣播機制
+    :param boxes2: 且需要保證最後一維為坐標維，以及坐標的存儲結構為(xmin, ymin, xmax, ymax)
+    :return: 返回boxes1和boxes2的IOU，IOU的shape為boxes1和boxes2廣播後的shape[:-1]
+    """
+    boxes1 = np.array(boxes1)
+    boxes2 = np.array(boxes2)
+
+    boxes1_area = (boxes1[..., 2] - boxes1[..., 0]) * (boxes1[..., 3] - boxes1[..., 1])
+    boxes2_area = (boxes2[..., 2] - boxes2[..., 0]) * (boxes2[..., 3] - boxes2[..., 1])
+
+    # 計算出boxes1和boxes2相交部分的左上角坐標、右下角坐標
+    left_up = np.maximum(boxes1[..., :2], boxes2[..., :2])
+    right_down = np.minimum(boxes1[..., 2:], boxes2[..., 2:])
+
+    # 計算出boxes1和boxes2相交部分的寬、高
+    # 因為兩個boxes沒有交集時，(right_down - left_up) < 0，所以maximum可以保證當兩個boxes沒有交集時，它們之間的iou為0
+    inter_section = np.maximum(right_down - left_up, 0.0)
+    inter_area = inter_section[..., 0] * inter_section[..., 1]
+    union_area = boxes1_area + boxes2_area - inter_area
+    IOU = 1.0 * inter_area / union_area
+    return IOU
+
+
+def nms(bboxes, score_threshold, iou_threshold, sigma=0.3, method='nms'):
+    """
+    :param bboxes:
+    假設有N個bbox的score大於score_threshold，那麼bboxes的shape為(N, 6)，存儲格式為(xmin, ymin, xmax, ymax, score, class)
+    其中(xmin, ymin, xmax, ymax)的大小都是相對於輸入原圖的，score = conf * prob，class是bbox所屬類別的索引號
+    :return: best_bboxes
+    假設NMS後剩下N個bbox，那麼best_bboxes的shape為(N, 6)，存儲格式為(xmin, ymin, xmax, ymax, score, class)
+    其中(xmin, ymin, xmax, ymax)的大小都是相對於輸入原圖的，score = conf * prob，class是bbox所屬類別的索引號
+    """
+    classes_in_img = list(set(bboxes[:, 5].astype(np.int32)))
+    best_bboxes = []
+
+    for cls in classes_in_img:
+        cls_mask = (bboxes[:, 5].astype(np.int32) == cls)
+        cls_bboxes = bboxes[cls_mask]
+        while len(cls_bboxes) > 0:
+            max_ind = np.argmax(cls_bboxes[:, 4])
+            best_bbox = cls_bboxes[max_ind]
+            best_bboxes.append(best_bbox)
+            cls_bboxes = np.concatenate([cls_bboxes[: max_ind], cls_bboxes[max_ind + 1:]])
+            iou = iou_numpy(best_bbox[np.newaxis, :4], cls_bboxes[:, :4])
+            assert method in ['nms', 'soft-nms']
+            weight = np.ones((len(iou),), dtype=np.float32)
+            if method == 'nms':
+                iou_mask = iou > iou_threshold
+                weight[iou_mask] = 0.0
+            if method == 'soft-nms':
+                weight = np.exp(-(1.0 * iou ** 2 / sigma))
+            cls_bboxes[:, 4] = cls_bboxes[:, 4] * weight
+            score_mask = cls_bboxes[:, 4] > score_threshold
+            cls_bboxes = cls_bboxes[score_mask]
+    return np.array(best_bboxes)

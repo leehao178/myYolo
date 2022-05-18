@@ -3,3 +3,4 @@ loguru
 opencv_python
 tensorboard
 tqdm
+PyYAML
