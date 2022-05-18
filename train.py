@@ -2,18 +2,20 @@ import os
 import argparse
 import time
 import shutil
-import cv2
+import datetime
+import random
+import yaml
 import torch
 from torch import nn
 from torch.utils.tensorboard import SummaryWriter
-from torch.optim.lr_scheduler import StepLR, MultiStepLR
-import datetime
+from torch.optim.lr_scheduler import MultiStepLR
 from models.data.datasets.dataset import Dataset
-from models.loss.loss import compute_loss
+from models.loss.loss import YOLOv3Loss
 from models.detector import YOLOv3
 from models.eval.evaluator import Evaluator
 from loguru import logger
-import yaml
+import numpy as np
+
 
 # python -m torch.distributed.launch --nproc_per_node=3 train.py
 # '/home/lab602.demo/.pipeline/datasets/VOCdevkit'
@@ -35,9 +37,9 @@ parser.add_argument('--epochs', default=20, type=int, metavar='N',
                     help='number of total epochs to run')
 parser.add_argument('--start-epoch', default=0, type=int, metavar='N',
                     help='manual epoch number (useful on restarts)')
-parser.add_argument('--workers', default=2, type=int, metavar='N',
+parser.add_argument('--workers', default=3, type=int, metavar='N',
                     help='number of data loading workers (default: 4)')
-parser.add_argument('-b', '--batch-size', default=16, type=int,
+parser.add_argument('-b', '--batch-size', default=14, type=int,
                     metavar='N',
                     help='mini-batch size (default: 128), this is the total '
                          'batch size of all GPUs on the current node when '
@@ -51,8 +53,17 @@ parser.add_argument("--local_rank", type=int, default=0,
 parser.add_argument("--pretrained", type=str, default='outputs/darknet53.conv.74',
                     help='node rank for distributed training')
 
+def init_seeds(seed=0):
+    random.seed(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    torch.cuda.manual_seed(seed)
+    torch.cuda.manual_seed_all(seed)
+    os.environ['PYTHONHASHSEED'] = str(seed)
+
 
 def main():
+    init_seeds(0)
     args = parser.parse_args()
     outputs = './outputs/{}'.format(args.name)
     logger.add(f'{outputs}/train_log.txt', encoding='utf-8', enqueue=True)
@@ -62,7 +73,7 @@ def main():
     with open(args.config_file, errors='ignore') as f:
         configs = yaml.safe_load(f)
 
-    milti_gpus = False
+    milti_gpus = True
     if milti_gpus:
         # 1) 初始化
         torch.distributed.init_process_group(backend="nccl")
@@ -79,11 +90,11 @@ def main():
             device = torch.device('cuda:{}'.format(args.gpu) if True else 'cpu')
             logger.info('Use GPU: {} for training'.format(args.gpu))
 
-    model = YOLOv3(anchors=torch.FloatTensor(configs['anchors']).to(device),
-                   strides=torch.FloatTensor(configs['strides'][0]).to(device),
+    model = YOLOv3(anchors=configs['anchors'],
+                   strides=configs['strides'][0],
                    num_classes=configs['nc'],
                    pretrained=args.pretrained)
-
+    model.load_darknet_weights(args.pretrained)
     if milti_gpus:
         # 4) 封裝之前要把模型移到對應的gpu
         model.to(device)
@@ -96,9 +107,9 @@ def main():
     else:
         if args.gpu is not None:
             model.cuda(args.gpu)
-
+    
     # define loss function (criterion) and optimizer
-    # criterion = YoloV3Loss(anchors=ANCHORS, strides=STRIDES,
+    # criterion = YOLOv3Loss(anchors=ANCHORS, strides=STRIDES,
     #                                 iou_threshold_loss=IOU_THRESHOLD_LOSS)
 
     if milti_gpus:
@@ -109,35 +120,38 @@ def main():
                                 weight_decay=float(configs['weight_decay']))
     start_epoch = 0
     # scheduler_LR = StepLR(optimizer, step_size=40, gamma=0.1)
-    scheduler_LR = MultiStepLR(optimizer, milestones=[25, 40], gamma=0.1, last_epoch=start_epoch - 1)
-    
-    
-    
+    scheduler_LR = MultiStepLR(optimizer,
+                               milestones=[25, 40],
+                               gamma=0.1,
+                               last_epoch=start_epoch - 1)
+
     if local_rank == 0:
         tblogger = SummaryWriter(os.path.join(outputs, "tensorboard"))
 
-    if args.resume:
-        if os.path.isfile(args.resume):
-            print("=> loading checkpoint '{}'".format(args.resume))
-            checkpoint = torch.load(args.resume)
-            args.start_epoch = checkpoint['epoch']
-            best_acc1 = checkpoint['best_acc1']
-            if args.gpu is not None:
-                # best_acc1 may be from a checkpoint from a different GPU
-                best_acc1 = best_acc1.to(args.gpu)
-            model.load_state_dict(checkpoint['state_dict'])
-            optimizer.load_state_dict(checkpoint['optimizer'])
-            print("=> loaded checkpoint '{}' (epoch {})"
-                  .format(args.resume, checkpoint['epoch']))
-        else:
-            print("=> no checkpoint found at '{}'".format(args.resume))
+    # if args.resume:
+    #     if os.path.isfile(args.resume):
+    #         print("=> loading checkpoint '{}'".format(args.resume))
+    #         checkpoint = torch.load(args.resume)
+    #         args.start_epoch = checkpoint['epoch']
+    #         best_acc1 = checkpoint['best_acc1']
+    #         if args.gpu is not None:
+    #             # best_acc1 may be from a checkpoint from a different GPU
+    #             best_acc1 = best_acc1.to(args.gpu)
+    #         model.load_state_dict(checkpoint['state_dict'])
+    #         optimizer.load_state_dict(checkpoint['optimizer'])
+    #         print("=> loaded checkpoint '{}' (epoch {})"
+    #               .format(args.resume, checkpoint['epoch']))
+    #     else:
+    #         print("=> no checkpoint found at '{}'".format(args.resume))
 
-    custom_datasets = Dataset(img_size=configs['train_size'],
-                        batch_size=args.batch_size,
-                        workers=args.workers,
-                        isDistributed=milti_gpus,
-                        data_dir=args.data,
-                        dataset_type='voc')
+    train_sampler = ''
+    custom_datasets = Dataset(  img_size=configs['train_size'],
+                                batch_size=args.batch_size,
+                                workers=args.workers,
+                                isDistributed=milti_gpus,
+                                data_dir=args.data,
+                                dataset_type='voc',
+                                configs=configs)
     train_loader, val_loader, train_sampler = custom_datasets.dataloader()
 
     best_acc1 = 0
@@ -145,6 +159,8 @@ def main():
     max_iter = len(train_loader)
 
     n_burnin = min(round(max_iter / 5 + 1), 1000)  # burn-in batches
+
+    criterion = YOLOv3Loss(iou_threshold_loss=0.5)
 
     for epoch in range(args.start_epoch, args.epochs):
         if milti_gpus:
@@ -171,7 +187,8 @@ def main():
                                                              max_iter,
                                                              args.epochs,
                                                              n_burnin, 
-                                                             configs)
+                                                             configs,
+                                                             criterion)
         if local_rank == 0:
             tblogger.add_scalar("train/loss", losses, epoch + 1)
             tblogger.add_scalar("train/xy_loss", xy_loss, epoch + 1)
@@ -189,14 +206,11 @@ def main():
                     'optimizer': optimizer.state_dict(),
                 }, is_best, outputs=outputs, epoch=epoch + 1)
         if local_rank == 0:
-            if (epoch + 1) % 50 == 0:
+            if (epoch + 1) % 20 == 0:
                 mAP = 0
                 logger.info('*'*20+"Validate"+'*'*20)
                 with torch.no_grad():
-                    APs = Evaluator(model,
-                                    dataloader=val_loader,
-                                    configs=configs,
-                                    epoch=epoch+1).APs_voc()
+                    APs = Evaluator(model).APs_voc()
                     for i in APs:
                         logger.info(f'{i} --> mAP : {APs[i]}')
                         mAP += APs[i]
@@ -213,7 +227,7 @@ def save_checkpoint(state, is_best, outputs='', epoch=''):
     if is_best:
         shutil.copyfile(filename, os.path.join(outputs, 'model_best.pth'))
 
-def train(train_loader, model, optimizer, epoch, args, rank, max_iter, max_epoch, n_burnin, configs):
+def train(train_loader, model, optimizer, epoch, args, rank, max_iter, max_epoch, n_burnin, configs, criterion):
     batch_time = AverageMeter()
     data_time = AverageMeter()
     losses = AverageMeter()
@@ -223,18 +237,17 @@ def train(train_loader, model, optimizer, epoch, args, rank, max_iter, max_epoch
     cls_loss = AverageMeter()
 
     # switch to train mode
-    
-
     end = time.time()
-
-    for i, (imgs, target, paths) in enumerate(train_loader):
+    mloss = torch.zeros(4).cuda()  # mean losses
+    for i, (imgs, bboxes_xywh, label)  in enumerate(train_loader):
         # measure data loading time
         data_time.update(time.time() - end)
 
         _, _, w, h = imgs.shape
-        if args.gpu is not None:
-            imgs = imgs.cuda()
-        target = target.cuda()
+
+        imgs = imgs.cuda()
+        bboxes_xywh = [bbox.cuda() for bbox in bboxes_xywh]
+        label = [labels.cuda() for labels in label]
 
         # SGD burn-in
         if epoch == 0 and i <= n_burnin:
@@ -243,22 +256,25 @@ def train(train_loader, model, optimizer, epoch, args, rank, max_iter, max_epoch
                 x['lr'] = lr
 
         # compute output
-        output = model(imgs)
-
-        loss, loss_components = compute_loss(output, target, model)
-
-        # measure accuracy and record loss
-        losses.update(loss.item(), imgs.size(0))
-        xy_loss.update(loss_components[0].item(), imgs.size(0))
-        wh_loss.update(loss_components[1].item(), imgs.size(0))
-        obj_loss.update(loss_components[2].item(), imgs.size(0))
-        cls_loss.update(loss_components[3].item(), imgs.size(0))
+        p, p_d = model(imgs)
+        loss, loss_xywh, loss_conf, loss_cls = criterion(p, p_d, bboxes_xywh, label, model)
 
 
         # compute gradient and do SGD step
         optimizer.zero_grad()
         loss.backward()
         optimizer.step()
+        
+        # Update running mean of tracked metrics
+        loss_items = torch.tensor([loss_xywh, loss_conf, loss_cls, loss]).cuda()
+        mloss = (mloss * i + loss_items) / (i + 1) # 平均值
+        # measure accuracy and record loss
+        losses.update(mloss[3].item(), imgs.size(0))
+        xy_loss.update(loss_xywh.item(), imgs.size(0))
+        wh_loss.update(loss_xywh.item(), imgs.size(0))
+        obj_loss.update(loss_conf.item(), imgs.size(0))
+        cls_loss.update(loss_cls.item(), imgs.size(0))
+
 
         # measure elapsed time
         batch_time.update(time.time() - end)

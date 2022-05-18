@@ -72,7 +72,8 @@ class RandomHorizontalFilp(object):
         if len(bboxes) > 0 and random.random() < self.prob:
             _, w, _ = img.shape
             img = np.fliplr(img)
-            bboxes[:, [1, 3]] = w - bboxes[:, [3, 1]]
+            # bboxes[:, [1, 3]] = w - bboxes[:, [3, 1]]
+            bboxes[:, [0, 2]] = w - bboxes[:, [2, 0]]
         return img, bboxes
 
 # TODO have bugs
@@ -86,7 +87,8 @@ class RandomCrop(object):
         if len(bboxes) > 0 and random.random() < self.p:
             h_img, w_img, _ = img.shape
 
-            max_bbox = np.concatenate([np.min(bboxes[:, 1:3], axis=0), np.max(bboxes[:, 3:5], axis=0)], axis=-1)
+            max_bbox = np.concatenate([np.min(bboxes[:, 0:2], axis=0), np.max(bboxes[:, 2:4], axis=0)], axis=-1)
+            # max_bbox = np.concatenate([np.min(bboxes[:, 1:3], axis=0), np.max(bboxes[:, 3:5], axis=0)], axis=-1)
             max_l_trans = max_bbox[0]
             max_u_trans = max_bbox[1]
             max_r_trans = w_img - max_bbox[2]
@@ -99,8 +101,10 @@ class RandomCrop(object):
 
             img = img[crop_ymin : crop_ymax, crop_xmin : crop_xmax]
 
-            bboxes[:, [1, 3]] = bboxes[:, [1, 3]] - crop_xmin
-            bboxes[:, [2, 4]] = bboxes[:, [2, 4]] - crop_ymin
+            # bboxes[:, [1, 3]] = bboxes[:, [1, 3]] - crop_xmin
+            # bboxes[:, [2, 4]] = bboxes[:, [2, 4]] - crop_ymin
+            bboxes[:, [0, 2]] = bboxes[:, [0, 2]] - crop_xmin
+            bboxes[:, [1, 3]] = bboxes[:, [1, 3]] - crop_ymin
         return img, bboxes
 
 
@@ -114,7 +118,8 @@ class RandomAffine(object):
         if len(bboxes) > 0 and random.random() < self.p:
             h_img, w_img, _ = img.shape
             # 得到可以包含所有bbox的最大bbox
-            max_bbox = np.concatenate([np.min(bboxes[:, 1:3], axis=0), np.max(bboxes[:, 3:5], axis=0)], axis=-1)
+            max_bbox = np.concatenate([np.min(bboxes[:, 0:2], axis=0), np.max(bboxes[:, 2:4], axis=0)], axis=-1)
+            # max_bbox = np.concatenate([np.min(bboxes[:, 1:3], axis=0), np.max(bboxes[:, 3:5], axis=0)], axis=-1)
             max_l_trans = max_bbox[0]
             max_u_trans = max_bbox[1]
             max_r_trans = w_img - max_bbox[2]
@@ -126,8 +131,10 @@ class RandomAffine(object):
             M = np.array([[1, 0, tx], [0, 1, ty]])
             img = cv2.warpAffine(img, M, (w_img, h_img))
 
-            bboxes[:, [1, 3]] = bboxes[:, [1, 3]] + tx
-            bboxes[:, [2, 4]] = bboxes[:, [2, 4]] + ty
+            # bboxes[:, [1, 3]] = bboxes[:, [1, 3]] + tx
+            # bboxes[:, [2, 4]] = bboxes[:, [2, 4]] + ty
+            bboxes[:, [0, 2]] = bboxes[:, [0, 2]] + tx
+            bboxes[:, [1, 3]] = bboxes[:, [1, 3]] + ty
         return img, bboxes
 
 
@@ -153,6 +160,39 @@ class Pad(object):
         
         return img, labels
 
+
+class Resize(object):
+    """
+    RGB轉換 ----->  resize(保持原有長寬比)
+    並可以選擇是否校正bbox
+    """
+    def __init__(self, target_shape, correct_box=True):
+        self.h_target, self.w_target = target_shape
+        self.correct_box = correct_box
+
+    def __call__(self, data):
+        img, bboxes = data
+        h_org , w_org , _= img.shape
+
+        img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB).astype(np.float32)
+
+        resize_ratio = min(1.0 * self.w_target / w_org, 1.0 * self.h_target / h_org)
+        resize_w = int(resize_ratio * w_org)
+        resize_h = int(resize_ratio * h_org)
+        image_resized = cv2.resize(img, (resize_w, resize_h))
+
+        image_paded = np.full((self.h_target, self.w_target, 3), 128.0)
+        dw = int((self.w_target - resize_w) / 2)
+        dh = int((self.h_target - resize_h) / 2)
+        image_paded[dh:resize_h + dh, dw:resize_w + dw, :] = image_resized
+        image = image_paded / 255.0  # normalize to [0, 1]
+
+
+        if self.correct_box:
+            bboxes[:, [0, 2]] = bboxes[:, [0, 2]] * resize_ratio + dw
+            bboxes[:, [1, 3]] = bboxes[:, [1, 3]] * resize_ratio + dh
+            return image, bboxes
+        return image
 
 class RelativeLabels(object):
     # 相對標籤

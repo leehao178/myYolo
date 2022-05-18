@@ -3,7 +3,7 @@ import torch
 import torch.nn as nn
 import math
 import numpy as np
-
+from models.utils.bbox import iou_xywh_torch
 
 class FocalLoss(nn.Module):
     def __init__(self, gamma=2.0, alpha=1.0, reduction="mean"):
@@ -78,168 +78,120 @@ def de_parallel(model):
     return model.module if is_parallel(model) else model
 
 
-def wh_iou(box1, box2):
-    # Returns the IoU of wh1 to wh2. wh1 is 2, wh2 is nx2
-    box2 = box2.t()
+class YOLOv3Loss(object):
+    def __init__(self, iou_threshold_loss=0.5):
+        self.iou_threshold_loss = iou_threshold_loss
 
-    # w, h = box1
-    w1, h1 = box1[0], box1[1]
-    w2, h2 = box2[0], box2[1]
+    def __call__(self, p, p_d, bboxes_xywh, label, model):
+        """
+        分層計算loss值。
+        :param p: 預測偏移值。 shape為[p0, p1, p2]共三個檢測層，其中以p0為例，其shape為(bs,  grid, grid, anchors, tx+ty+tw+th+conf+cls_20)
+        :param p_d: 解碼後的預測值。 shape為[pd0, pd1, pd2]，其中以pd0為例，其shape為(bs,  grid, grid, anchors, x+y+w+h+conf+cls_20)
+        :param label_sbbox: small 檢測層的分配標籤, shape為[bs,  grid, grid, anchors, x+y+w+h+conf+cls_20]
+        :param label_mbbox: medium檢測層的分配標籤, shape為[bs,  grid, grid, anchors, x+y+w+h+conf+cls_20]
+        :param label_lbbox: large檢測層的分配標籤, shape為[bs,  grid, grid, anchors, x+y+w+h+conf+cls_20]
+        :param sbboxes: small檢測層的bboxes, shape為[bs, 150, x+y+w+h]
+        :param mbboxes: medium檢測層的bboxes, shape為[bs, 150, x+y+w+h]
+        :param lbboxes: large檢測層的bboxes, shape為[bs, 150, x+y+w+h]
+        :return: loss為總損失值，loss_l[m, s]為每層的損失值
+        """
+        m = de_parallel(model)
+        num_anchors = m.num_anchors
+        anchors = m.anchors
+        strides = m.strides
+        num_layers = m.num_layers
+        num_classes = m.num_classes
 
-    # Intersection area
-    inter_area = torch.min(w1, w2) * torch.min(h1, h2)
+        loss_s, loss_s_xywh, loss_s_conf, loss_s_cls = self.cal_loss(p[0], p_d[0], label[0], bboxes_xywh[0], anchors[0, :, :] / strides[0], strides[0])
+        loss_m, loss_m_xywh, loss_m_conf, loss_m_cls = self.cal_loss(p[1], p_d[1], label[1], bboxes_xywh[1], anchors[1, :, :] / strides[1], strides[1])
+        loss_l, loss_l_xywh, loss_l_conf, loss_l_cls = self.cal_loss(p[2], p_d[2], label[2], bboxes_xywh[2], anchors[2, :, :] / strides[2], strides[2])
+        loss = (loss_l + loss_m + loss_s) / 3
+        loss_xywh = (loss_s_xywh + loss_m_xywh + loss_l_xywh) / 3
+        loss_conf = (loss_s_conf + loss_m_conf + loss_l_conf) / 3
+        loss_cls = (loss_s_cls + loss_m_cls + loss_l_cls) / 3
 
-    # Union Area
-    union_area = (w1 * h1 + 1e-16) + w2 * h2 - inter_area
-
-    return inter_area / union_area  # iou
-
-
-hyp = {'giou': 1.666,  # giou loss gain
-       'xy': 4.062,  # xy loss gain
-       'wh': 0.1845,  # wh loss gain
-       'cls': 42.6,  # cls loss gain
-       'cls_pw': 3.34,  # cls BCELoss positive_weight
-       'obj': 12.61,  # obj loss gain
-       'obj_pw': 8.338,  # obj BCELoss positive_weight
-       'iou_t': 0.2705,  # iou target-anchor training threshold
-       'lr0': 0.001,  # initial learning rate
-       'lrf': -4.,  # final learning rate = lr0 * (10 ** lrf)
-       'momentum': 0.90,  # SGD momentum
-       'weight_decay': 0.0005}  # optimizer weight decay
-
-
-def compute_loss(pred, targets, model):  # predictions, targets, model
-    ft = torch.cuda.FloatTensor if pred[0].is_cuda else torch.Tensor
-    lxy, lwh, lcls, lobj = ft([0]), ft([0]), ft([0]), ft([0])
-    txy, twh, tcls, indices = build_targets(pred, model, targets)#在13 26 52維度中找到大於iou閾值最適合的anchor box 作為targets
-    #txy[維度(0:2),(x,y)] twh[維度(0:2),(w,h)] indices=[0,anchor索引，gi，gj]
-
-    # Define Loss
-    MSE = nn.MSELoss()
-    # CE = nn.CrossEntropyLoss()
-    # BCE = nn.BCEWithLogitsLoss()
-    # BCEcls = nn.BCEWithLogitsLoss(pos_weight=ft([hyp['cls_pw']]))
-    # BCEobj = nn.BCEWithLogitsLoss(pos_weight=ft([hyp['obj_pw']]))
-
-    BCExy = nn.BCEWithLogitsLoss()
-    BCEcls = nn.BCEWithLogitsLoss()
-    BCEobj = nn.BCEWithLogitsLoss()
-
-    # Compute losses
-    # h = model.hyp  # hyperparameters
-    batch_size = pred[0].shape[0]  # batch size
-    k = batch_size / 64  # loss gain
-
-    for i, pi0 in enumerate(pred):  # layer i predictions, i
-        # pi0 = torch.Size([16, 3, 13, 13, 25])
-        b, a, gj, gi = indices[i]  # image, anchor, gridx, gridy
-        # tobj = torch.Size([16, 3, 13, 13])
-        tobj = torch.zeros_like(pi0[..., 0])  # conf
-
-        # Compute losses
-        if len(b):  # number of targets
-            pi = pi0[b, a, gj, gi]  # predictions closest to anchors 找到p中與targets對應的數據lxy
-            # pi = torch.Size([num_target, 25])
-            tobj[b, a, gj, gi] = 1  # conf
-            # pi[..., 2:4] = torch.sigmoid(pi[..., 2:4])  # wh power loss (uncomment)
-
-            # torch.Size([num_target, 2])
-            lxy += BCExy(pi[..., 0:2], txy[i])  # xy loss
-            lwh += MSE(pi[..., 2:4], twh[i])  # wh yolo loss
-
-            # tclsm = torch.Size([num_target, 20])
-            tclsm = torch.zeros_like(pi[..., 5:])
-            tclsm[range(len(b)), tcls[i]] = 1.0
-            lcls += BCEcls(pi[..., 5:], tclsm)  # class_conf loss
-            # lcls += (k * hyp['cls']) * CE(pi[..., 5:], tcls[i])  # cls loss (CE)
-
-        # pos_weight = ft([gp[i] / min(gp) * 4.])
-        # BCE = nn.BCEWithLogitsLoss(pos_weight=pos_weight)
-        lobj += BCEobj(pi0[..., 4], tobj)  # obj_conf loss
-    
-    # lxy *= (k * hyp['xy'])
-    # lwh *= (k * hyp['wh'])
-    # lobj *= (k * hyp['cls'])
-    # lcls *= (k * hyp['obj'])
-
-    lxy *= 2.0
-    lwh *= 2.0
-    lobj *= 1.0
-    lcls *= 1.0
-    loss = lxy + lwh + lobj + lcls
-
-    return loss, torch.cat((lxy, lwh, lobj, lcls, loss)).detach()
+        return loss, loss_xywh, loss_conf, loss_cls
 
 
+    def cal_loss(self, p, p_d, label, bboxes, anchors, stride):
+        """
+        計算每一層的損失。損失由三部分組成，(1)boxes的回歸損失。計算預測的偏移量和標籤的偏移量之間的損失。其中
+        首先需要將標籤的坐標轉換成該層的相對於每個網格的偏移量以及長寬相對於每個anchor的比例係數。
+        注意：損失的係數為2-w*h/(img_size**2),用於在不同尺度下對損失值大小影響不同的平衡。
+        (2)置信度損失。包括前景和背景的置信度損失值。其中背景損失值需要注意的是在某特徵點上標籤為背景並且該點預測的anchor
+        與該image所有bboxes的最大iou小於閾值時才計算該特徵點的背景損失。
+        (3)類別損失。類別損失為BCE，即每個類的二分類值。
+        :param p: 沒有進行解碼的預測值，表示形式為(bs,  grid, grid, anchors, tx+ty+tw+th+conf+classes)
+        :param p_d: p解碼以後的結果。 xywh均為相對於原圖的尺度和位置，conf和cls均進行sigmoid。表示形式為
+        [bs, grid, grid, anchors, x+y+w+h+conf+cls]
+        :param label: lable的表示形式為(bs,  grid, grid, anchors, x+y+w+h+conf+cls) 其中xywh均為相對於原圖的尺度和位置。
+        :param bboxes: 該batch內分配給該層的所有bboxes，shape為(bs, 150, 4).
+        :param anchors: 該檢測層的ahchor尺度大小。格式為torch.tensor
+        :param stride: 該層feature map相對於原圖的尺度縮放量
+        :return: 該檢測層的所有batch平均損失。 loss=loss_xywh + loss_conf + loss_cls。
+        """
+        BCE = nn.BCEWithLogitsLoss(reduction="none")
+        MSE = nn.MSELoss(reduction="none")
 
-def build_targets(pred, model, targets):
-    # pred = [0_batch_size, 1_self.num_anchors, 2_nG, 3_nG, 4_5+self.num_classes]
-    # targets = [image, class, x(歸一後的中心), y, w（歸一後的寬）, h] [ 0.00000, 20.00000,  0.72913,  0.48770,  0.13595,  0.08381]
-    # iou_thres = model.hyp['iou_t']  # hyperparameter
-    iou_thres = 0.2
-    # if type(model) in (nn.parallel.DataParallel, nn.parallel.DistributedDataParallel):
-    #     model = model.module
+        batch_size, grid = p.shape[:2]
+        img_size = stride * grid
+        device = p.device
 
-    # ANCHORS = [[(10,13), (16,30), (33,23)],  # Anchors for small obj
-    #             [(30,61, ), (62,45), (59,119)],  # Anchors for medium obj
-    #             [(116,90), (156,198), (373,326)]]# Anchors for big obj
-    
-    m = de_parallel(model)
-    num_anchors = m.num_anchors
-    # anchors = torch.Tensor(ANCHORS).to(pred[0].device)
-    anchors = m.anchors
-    strides = m.strides
-    num_layers = m.num_layers
-    num_classes = m.num_classes
+        p_dxdy = p[..., 0:2]
+        p_dwdh = p[..., 2:4]
+        p_conf = p[..., 4:5]
+        p_cls = p[..., 5:]
 
-    # print('12312313')
-    # print(targets.shape)
+        p_d_xywh = p_d[..., :4]  # 用於計算iou
 
-    num_targets = len(targets)
-    txy, twh, tcls, indices = [], [], [], []
-    # for i in model.yolo_layers:
-    for i in range(num_layers):
-        anchor = anchors[i, :, :] / strides[i]
-        feature_size = pred[i].shape[2]
-        # iou of targets-anchors
-        t, anchor_i = targets, []
-        gwh = targets[:, 4:6] * feature_size  # nG layer.ng就是yolo層輸出維度13  26  52，gwh將原來的wh還原到13*13的圖上
-        if num_targets:
-            # 計算3 anchor對應的iou
-            iou = [wh_iou(x, gwh) for x in anchor]
-            iou, anchor_i = torch.max(torch.stack(iou, dim=0), dim=0)  # best iou and anchor找到每一層與label->wh，iou最大的anchor,a是anchor的索引
 
-            # reject below threshold ious (OPTIONAL, increases P, lowers R)
-            reject = True
-            if reject:
-                j = iou > iou_thres
-                t, anchor_i, gwh = targets[j], anchor_i[j], gwh[j]
+        label_xywh = label[..., :4]
+        label_obj_mask = label[..., 4:5]
+        label_cls = label[..., 5:]
 
-        # Indices targets = [image, class, x(歸一後的中心), y, w（歸一後的寬）, h]
-        # torch.Size([num_targets, 2]) -> torch.Size([2, num_targets])
-        b, c = t[:, :2].long().t()  # target image, class
+        # loss xywh
+        ## label的坐標轉換為tx,ty,tw,th
+        y = torch.arange(0, grid).unsqueeze(1).repeat(1, grid)
+        x = torch.arange(0, grid).unsqueeze(0).repeat(grid, 1)
+        grid_xy = torch.stack([x, y], dim=-1)
+        grid_xy = grid_xy.unsqueeze(0).unsqueeze(3).repeat(batch_size, 1, 1, 3, 1).float().to(device)
 
-        # torch.Size([num_targets, 2])
-        gxy = t[:, 2:4] * feature_size # 表示真實框的x軸y軸座標
 
-        # torch.Size([num_targets, 2]) -> torch.Size([2, num_targets])
-        gi, gj = gxy.long().t()  # grid_i, grid_j 表示真實框對應特徵點的x軸y軸座標
-        indices.append((b, anchor_i, gj, gi))
-        # XY coordinates
-        txy.append(gxy - gxy.floor())#在yolov3裡是Gx,Gy減去grid cell左上角坐標Cx,Cy
-        # Width and height
-        twh.append(torch.log(gwh / anchor[anchor_i]))  # wh yolo method
-        # twh.append((gwh / layer.anchor_vec[a]) ** (1 / 3) / 2)  # wh power method
-        # Class
-        tcls.append(c)
-        # print(c.shape)
-        # print(c.shape[0])
-        # print(c)
-        if c.shape[0]:
-            assert c.max() <= num_classes, 'Target classes exceed model classes'
+        label_txty = (1.0 * label_xywh[..., :2] / stride) - grid_xy
+        label_twth = torch.log((1.0 * label_xywh[..., 2:] / stride) / anchors.to(device))
+        label_twth = torch.where(torch.isinf(label_twth), torch.zeros_like(label_twth), label_twth)
 
-    return txy, twh, tcls, indices
+        # bbox的尺度縮放權值
+        bbox_loss_scale = 2.0 - 1.0 * label_xywh[..., 2:3] * label_xywh[..., 3:4] / (img_size ** 2)
+
+        loss_xy = label_obj_mask * bbox_loss_scale * BCE(input=p_dxdy, target=label_txty)
+        loss_wh = 0.5 * label_obj_mask * bbox_loss_scale * MSE(input=p_dwdh, target=label_twth)
+
+
+        # loss confidence
+        iou = iou_xywh_torch(p_d_xywh.unsqueeze(4), bboxes.unsqueeze(1).unsqueeze(1).unsqueeze(1))
+        iou_max = iou.max(-1, keepdim=True)[0]
+        label_noobj_mask = (1.0 - label_obj_mask) * (iou_max < self.iou_threshold_loss).float()
+
+        loss_conf = label_obj_mask * BCE(input=p_conf, target=label_obj_mask) + \
+                    label_noobj_mask * BCE(input=p_conf, target=label_obj_mask)
+
+        # loss classes
+        loss_cls = label_obj_mask * BCE(input=p_cls, target=label_cls)
+
+        # loss = torch.cat([loss_xy, loss_wh, loss_conf, loss_cls], dim=-1)
+        # loss = loss.sum([1,2,3,4], keepdim=True).mean()  # batch的平均損失
+
+        # loss_xywh = torch.cat([loss_xy, loss_wh], dim=-1)
+
+        loss_xywh = (torch.sum(loss_xy) + torch.sum(loss_wh)) / batch_size
+        loss_conf = (torch.sum(loss_conf)) / batch_size
+        loss_cls = (torch.sum(loss_cls)) / batch_size
+
+        loss = loss_xywh + loss_conf + loss_cls
+
+        return loss, loss_xywh, loss_conf, loss_cls
+
 
 if __name__ == "__main__":
     import sys,os

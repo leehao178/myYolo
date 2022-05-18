@@ -15,8 +15,8 @@ class YOLOv3(nn.Module):
     """
     def __init__(self, anchors, strides, num_classes=20, num_anchors=3, num_layers=3, pretrained=None):
         super(YOLOv3, self).__init__()
-        self.anchors = anchors
-        self.strides = strides
+        self.anchors = torch.FloatTensor(anchors)
+        self.strides = torch.FloatTensor(strides)
         self.num_anchors = num_anchors
         self.num_classes = num_classes
         self.num_layers = num_layers
@@ -26,15 +26,14 @@ class YOLOv3(nn.Module):
         self.fpn = YOLOFPN(in_channels=[1024, 512, 256], out_channels=out_channels)
 
         # small
-        self.head_s = YOLOHead(num_classes=num_classes, anchors=anchors[0, :, :])
+        self.head_s = YOLOHead(num_classes=num_classes, anchors=self.anchors[0, :, :], stride=self.strides[0])
         # medium
-        self.head_m = YOLOHead(num_classes=num_classes, anchors=anchors[1, :, :])
+        self.head_m = YOLOHead(num_classes=num_classes, anchors=self.anchors[1, :, :], stride=self.strides[1])
         # large
-        self.head_l = YOLOHead(num_classes=num_classes, anchors=anchors[2, :, :])
+        self.head_l = YOLOHead(num_classes=num_classes, anchors=self.anchors[2, :, :], stride=self.strides[2])
 
         if pretrained is not None:
             self.init_weights()
-            self.load_darknet_weights(weight_file=pretrained)
         else:
             self.init_weights()
 
@@ -57,9 +56,9 @@ class YOLOv3(nn.Module):
         x_large = torch.Size([16, 75, 13, 13])
         '''
 
-        out.append(self.head_s(x_small, img_size))
-        out.append(self.head_m(x_medium, img_size))
-        out.append(self.head_l(x_large, img_size))
+        out.append(self.head_s(x_small))
+        out.append(self.head_m(x_medium))
+        out.append(self.head_l(x_large))
         '''
         head_s = torch.Size([16, 3, 52, 52, 25])
         head_m = torch.Size([16, 3, 26, 26, 25])
@@ -67,19 +66,11 @@ class YOLOv3(nn.Module):
         '''
 
         if self.training:
-            return out
+            p, p_d = list(zip(*out))
+            return p, p_d  # smalll, medium, large
         else:
-            io, pred = list(zip(*out))  # inference output, training output
-            '''
-            io[0] = torch.Size([16, 8112, 25])
-            io[1] = torch.Size([16, 2028, 25])
-            io[2] = torch.Size([16, 507, 25])
-            p[0] = torch.Size([16, 3, 52, 52, 25])
-            p[1] = torch.Size([16, 3, 26, 26, 25])
-            p[2] = torch.Size([16, 3, 13, 13, 25])
-            torch.cat(io, 1) = torch.Size([16, 10647, 25])
-            '''
-            return torch.cat(io, 1), pred
+            p, p_d = list(zip(*out))
+            return p, torch.cat(p_d, 0)
 
     def init_weights(self):
         " Note ：nn.Conv2d nn.BatchNorm2d'initing modes are uniform "
